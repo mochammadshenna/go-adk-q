@@ -1,0 +1,8 @@
+# compiled binary (go build .)
+/go-adk-q
+
+# cross-compilation output
+/bin/
+
+# environment — never commit secrets
+.env
