@@ -37,6 +37,7 @@ import (
 	"go-adk-q/agents"
 	"go-adk-q/model/echo"
 	"go-adk-q/model/failover"
+	"go-adk-q/model/githubmodels"
 	"go-adk-q/model/groq"
 	"go-adk-q/model/huggingface"
 	"go-adk-q/model/nvidia"
@@ -115,6 +116,17 @@ func init() {
 func buildRunner(ctx context.Context) (*runner.Runner, session.Service, memory.Service, string, error) {
 	var candidateLLMs []model.LLM
 
+	// GitHub Models — enabled when GITHUB_PAT is set. Highest priority:
+	// supports GPT-4o, LLaMA 4, Claude, Gemini, DeepSeek and more via a
+	// single GitHub PAT. Set GITHUB_MODEL to override the default (gpt-4o).
+	if cfg := githubmodels.ConfigFromEnv(); cfg.PAT != "" {
+		m, err := githubmodels.NewModel(ctx, cfg)
+		if err != nil {
+			return nil, nil, nil, "", fmt.Errorf("githubmodels: %w", err)
+		}
+		candidateLLMs = append(candidateLLMs, m)
+	}
+
 	// Gemini — enabled when GOOGLE_API_KEY is set.
 	if key := os.Getenv("GOOGLE_API_KEY"); key != "" {
 		name := os.Getenv("GOOGLE_MODEL")
@@ -173,7 +185,7 @@ func buildRunner(ctx context.Context) (*runner.Runner, session.Service, memory.S
 	if len(candidateLLMs) == 0 {
 		return nil, nil, nil, "", fmt.Errorf(
 			"no model providers configured — set at least one of: " +
-				"GOOGLE_API_KEY, GROQ_API_KEY, NVIDIA_API_KEY, OPENROUTER_API_KEY, HF_TOKEN",
+				"GITHUB_PAT, GOOGLE_API_KEY, GROQ_API_KEY, NVIDIA_API_KEY, OPENROUTER_API_KEY, HF_TOKEN",
 		)
 	}
 

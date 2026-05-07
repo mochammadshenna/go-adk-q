@@ -221,8 +221,8 @@ verify-elf: ## Run 'file' on built linux binaries; print glibc-check instruction
 	@echo "    readelf -d <binary> | grep NEEDED    # expect: libc.so.6 for CGO builds"
 
 # ── run modes ─────────────────────────────────────────────────────────────────
-.PHONY: run
-run: ## Start Bubbletea/Lipgloss TUI chat (full-terminal UI with spinner and colours)
+.PHONY: chat
+chat: ## Start Bubbletea/Lipgloss TUI chat (full-terminal UI with spinner and colours)
 	$(GO) run $(GOFLAGS) ./cmd/tui chat
 
 .PHONY: console
@@ -233,8 +233,8 @@ console: ## Start ADK built-in text console (raw readline REPL, no Bubbletea)
 web: ## Start browser dev-UI + REST API at http://localhost:8080 (web webui api)
 	$(GO) run $(GOFLAGS) . web webui api
 
-.PHONY: api
-api: ## Start REST API server only at http://localhost:8080 (web api)
+.PHONY: run
+run: ## Start REST API server only at http://localhost:8080 (web api)
 	$(GO) run $(GOFLAGS) . web api
 
 # ── quality ───────────────────────────────────────────────────────────────────

@@ -21,7 +21,11 @@
 //
 // # Running
 //
-//	# Required
+//	# Highest priority — GitHub Models (single PAT, many models)
+//	export GITHUB_PAT=github_pat_...          # required for GitHub Models
+//	export GITHUB_MODEL=gpt-4o                # optional; default: gpt-4o
+//
+//	# Required (if GITHUB_PAT not set)
 //	export GOOGLE_API_KEY=<your-key>
 //	export GOOGLE_MODEL=gemini-2.0-flash  # optional; default model (upgrade to gemini-2.5-flash if your key allows)
 //
@@ -95,6 +99,7 @@ import (
 
 	"go-adk-q/model/echo"
 	"go-adk-q/model/failover"
+	"go-adk-q/model/githubmodels"
 	"go-adk-q/model/groq"
 	"go-adk-q/model/huggingface"
 	"go-adk-q/model/nvidia"
@@ -122,7 +127,7 @@ func main() {
 	// ── Provider setup ────────────────────────────────────────────────────────
 	// Every provider is optional. The first configured provider becomes primary;
 	// the rest form the automatic fallback chain in priority order:
-	//   Gemini → Groq → NVIDIA → OpenRouter → HuggingFace → echo (test only)
+	//   GitHub Models → Gemini → Groq → NVIDIA → OpenRouter → HuggingFace → echo (test only)
 	//
 	// If GOOGLE_API_KEY is not set, Gemini is skipped entirely — no wasted
 	// round-trips and no WARN noise.  Set at least one provider key or the
@@ -133,7 +138,20 @@ func main() {
 	var candidateLLMs []model.LLM
 	var err error
 
-	// Gemini — optional; primary when GOOGLE_API_KEY is set.
+	// GitHub Models — highest priority; enabled when GITHUB_PAT is set.
+	// Supports GPT-4o, LLaMA 4, Claude, Gemini, DeepSeek, Mistral and more
+	// via a single GitHub PAT with the "models" permission.
+	// Set GITHUB_MODEL to override the default (gpt-4o).
+	var githubLLM model.LLM
+	if ghCfg := githubmodels.ConfigFromEnv(); ghCfg.PAT != "" {
+		githubLLM, err = githubmodels.NewModel(ctx, ghCfg)
+		mustOK(err, "create githubmodels model")
+		candidateLLMs = append(candidateLLMs, githubLLM)
+	} else {
+		slog.Info("GITHUB_PAT not set — GitHub Models skipped; set it at https://github.com/settings/tokens")
+	}
+
+	// Gemini — optional; enabled when GOOGLE_API_KEY is set.
 	// GOOGLE_MODEL overrides the model name (e.g. set to a bad value to force
 	// failover during testing: GOOGLE_MODEL=gemini-intentionally-broken).
 	if googleKey := os.Getenv("GOOGLE_API_KEY"); googleKey != "" {
@@ -203,7 +221,7 @@ func main() {
 	// Require at least one provider.
 	if len(candidateLLMs) == 0 {
 		log.Fatal("no model providers configured — set at least one of: " +
-			"GOOGLE_API_KEY, GROQ_API_KEY, NVIDIA_API_KEY, OPENROUTER_API_KEY, HF_TOKEN")
+			"GITHUB_PAT, GOOGLE_API_KEY, GROQ_API_KEY, NVIDIA_API_KEY, OPENROUTER_API_KEY, HF_TOKEN")
 	}
 
 	// Build the failover chain: first provider is primary, rest are fallbacks.
