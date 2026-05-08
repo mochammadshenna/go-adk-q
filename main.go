@@ -75,6 +75,7 @@ import (
 	"log"
 	"log/slog"
 	"os"
+	"strings"
 
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 
@@ -94,8 +95,9 @@ import (
 	"google.golang.org/adk/telemetry"
 	"google.golang.org/adk/tool"
 	"google.golang.org/adk/tool/agenttool"
-	"google.golang.org/adk/tool/skilltoolset"
 	"google.golang.org/adk/tool/skilltoolset/skill"
+
+	localskilltoolset "go-adk-q/tool/skilltoolset"
 
 	"go-adk-q/model/echo"
 	"go-adk-q/model/failover"
@@ -224,32 +226,33 @@ func main() {
 			"GITHUB_PAT, GOOGLE_API_KEY, GROQ_API_KEY, NVIDIA_API_KEY, OPENROUTER_API_KEY, HF_TOKEN")
 	}
 
+	// PROVIDER_SELECTED moves the named provider to the front of the chain.
+	// Valid values: github, gemini, groq, nvidia, openrouter, huggingface, echo.
+	// Example: export PROVIDER_SELECTED=openrouter
+	candidateLLMs = applyProviderSelected(candidateLLMs)
+
 	// Build the failover chain: first provider is primary, rest are fallbacks.
 	m := failover.New(candidateLLMs[0], candidateLLMs[1:]...)
 	slog.Info("model chain", "providers", m.Name())
 
-	// Skills toolset — only attached when Gemini (GOOGLE_API_KEY) is the
-	// primary provider.  Non-Gemini models cannot reliably call load_skill and
-	// return 400/500 errors when the tool is advertised in the request.
+	// Skills toolset — enabled for any provider when ./skills/ dir exists.
+	// skilltoolset uses plain functiontool.New internally with no Gemini
+	// dependency; any model with function calling support can use it.
 	var agentToolsets []tool.Toolset
-	if os.Getenv("GOOGLE_API_KEY") != "" {
-		if _, statErr := os.Stat("./skills"); statErr == nil {
-			rawSource := skill.NewFileSystemSource(os.DirFS("./skills"))
-			preloaded, _, preloadErr := skill.WithCompletePreloadSource(ctx, rawSource)
-			if preloadErr != nil {
-				slog.Warn("skills preload failed — running without skills", "error", preloadErr)
+	if _, statErr := os.Stat("./skills"); statErr == nil {
+		rawSource := skill.NewFileSystemSource(os.DirFS("./skills"))
+		preloaded, _, preloadErr := skill.WithCompletePreloadSource(ctx, rawSource)
+		if preloadErr != nil {
+			slog.Warn("skills preload failed — running without skills", "error", preloadErr)
+		} else {
+			st, stErr := localskilltoolset.New(ctx, localskilltoolset.Config{Source: preloaded})
+			if stErr != nil {
+				slog.Warn("skills toolset init failed — running without skills", "error", stErr)
 			} else {
-				st, stErr := skilltoolset.New(ctx, skilltoolset.Config{Source: preloaded})
-				if stErr != nil {
-					slog.Warn("skills toolset init failed — running without skills", "error", stErr)
-				} else {
-					agentToolsets = append(agentToolsets, st)
-					slog.Info("skills toolset enabled", "path", "./skills")
-				}
+				agentToolsets = append(agentToolsets, st)
+				slog.Info("skills toolset enabled", "path", "./skills")
 			}
 		}
-	} else {
-		slog.Info("skills toolset disabled — GOOGLE_API_KEY not set; set it to enable skills")
 	}
 
 	// ── 2. FunctionTools ─────────────────────────────────────────────────────
@@ -790,4 +793,38 @@ func mustOK(err error, what string) {
 	if err != nil {
 		log.Fatalf("failed to %s: %v", what, err)
 	}
+}
+
+// applyProviderSelected reads PROVIDER_SELECTED and moves the matching
+// provider to the front of the candidateLLMs slice so it becomes the
+// primary model in the failover chain. All other providers remain as
+// ordered fallbacks.
+//
+// Valid values (case-insensitive):
+//
+//	github, gemini, groq, nvidia, openrouter, huggingface, echo
+//
+// Example:
+//
+//	export PROVIDER_SELECTED=openrouter
+func applyProviderSelected(llms []model.LLM) []model.LLM {
+	sel := strings.ToLower(strings.TrimSpace(os.Getenv("PROVIDER_SELECTED")))
+	if sel == "" || len(llms) <= 1 {
+		return llms
+	}
+	for i, m := range llms {
+		if strings.Contains(strings.ToLower(m.Name()), sel) {
+			if i == 0 {
+				return llms // already first
+			}
+			reordered := make([]model.LLM, 0, len(llms))
+			reordered = append(reordered, llms[i])
+			reordered = append(reordered, llms[:i]...)
+			reordered = append(reordered, llms[i+1:]...)
+			slog.Info("PROVIDER_SELECTED applied", "provider", sel, "model", m.Name())
+			return reordered
+		}
+	}
+	slog.Warn("PROVIDER_SELECTED: no configured provider matched", "value", sel)
+	return llms
 }

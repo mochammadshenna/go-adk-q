@@ -8,7 +8,6 @@ import (
 	"github.com/firebase/genkit/go/ai"
 	"github.com/firebase/genkit/go/genkit"
 	"github.com/firebase/genkit/go/plugins/compat_oai"
-	"github.com/openai/openai-go"
 )
 
 func main() {
@@ -31,21 +30,60 @@ func main() {
 		genkit.WithDefaultModel("github-models/gpt-4o"),
 	)
 
-	config := &openai.ChatCompletionNewParams{
-		MaxCompletionTokens: openai.Int(1000),
-		Temperature:         openai.Float(0.7),
-		TopP:                openai.Float(0.9),
-		ReasoningEffort:     openai.ReasoningEffortLow,
-	}
+	// config := &openai.ChatCompletionNewParams{
+	// 	MaxCompletionTokens: openai.Int(1000),
+	// 	Temperature:         openai.Float(1.0),
+	// 	TopP:                openai.Float(1.0),
+	// 	ReasoningEffort:     openai.ReasoningEffortLow,
+	// }
 
-	// Examples: "gpt-4o", "gpt-4o-mini", "o3-mini", "Meta-Llama-3.1-405B-Instruct", "Meta-Llama-3.1-8B-Instruct", "Cohere-command-r-plus-08-2024", "DeepSeek-V3-0324", "gemini-2.0-flash", "Llama-4-Scout-17B-16E-Instruct"
+	// TESTED MODELS:
+	// TODO : DO NOT NEED config completion tokens 1000, reasoning effort low, temperature 0.7, top_p 0.9 for some models, need to verify with GitHub Models team which models need those configs and which do not
+	// githubModel := "github-models/Codestral-2501"
+	// githubModel := "github-models/Ministral-3B"
+	// githubModel := "github-models/mistral-small-2503"
+	// githubModel := "github-models/mistral-medium-2505"
+	// githubModel := "github-models/gpt-4o"
+	// githubModel := "github-models/gpt-4o-mini"
+	// githubModel := "github-models/gpt-4.1"
+	// githubModel := "github-models/gpt-4.1-mini"
+	// githubModel := "github-models/gpt-4.1-nano"
+	// githubModel := "github-models/gpt-5"
+	// githubModel := "github-models/gpt-5-mini"
+	// githubModel := "github-models/gpt-5-nano"
+	// githubModel := "github-models/gpt-5-chat"
+
+	// TODO : can with and without config completion tokens
+	// githubModel := "github-models/o3-mini"
+	// githubModel := "github-models/Meta-Llama-3.1-405B-Instruct"
+	// githubModel := "github-models/Meta-Llama-3.1-8B-Instruct"
+	// githubModel := "github-models/Llama-3.2-11B-Vision-Instruct"
+	// githubModel := "github-models/Llama-3.2-90B-Vision-Instruct"
+	// githubModel := "github-models/Llama-3.3-70B-Instruct"
+	// githubModel := "github-models/Llama-4-Maverick-17B-128E-Instruct-FP8"
+	// githubModel := "github-models/Llama-4-Scout-17B-16E-Instruct"
+	// githubModel := "github-models/Cohere-command-r-08-2024"
+	// githubModel := "github-models/Cohere-command-r-plus-08-2024"
+	// githubModel := "github-models/Cohere-command-a"
+	// githubModel := "github-models/DeepSeek-R1"
+	// githubModel := "github-models/DeepSeek-R1-0528"
+	// githubModel := "github-models/DeepSeek-V3-0324"
+	githubModel := "github-models/Phi-4"
+	// githubModel := "github-models/Phi-4-mini-instruct"
+	// githubModel := "github-models/Phi-4-multimodal-instruct"
+	// githubModel := "github-models/Phi-4-mini-reasoning"
+	// githubModel := "github-models/Phi-4-reasoning"
+	// githubModel := "github-models/AI21-Jamba-1.5-Large"
+	// githubModel := "github-models/AI21-Jamba-Instruct"
+	// githubModel := "github-models/claude-3-5-sonnet@20240620"
+
 	// 3. Define a flow that sends a prompt to the model and returns the text.
 	analyzeFlow := genkit.DefineFlow(g, "analyzeCodeFlow",
 		func(ctx context.Context, code string) (string, error) {
 			resp, err := genkit.Generate(ctx, g,
-				ai.WithModelName("github-models/Llama-4-Scout-17B-16E-Instruct"),
+				ai.WithModelName(githubModel),
 				ai.WithPrompt("Analyze the following code and explain what it does:\n\n%s", code),
-				ai.WithConfig(config),
+				// ai.WithConfig(config),
 			)
 			if err != nil {
 				return "", err

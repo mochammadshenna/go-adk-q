@@ -8,14 +8,16 @@ Run each section top-to-bottom; earlier turns intentionally build state for late
 ## Prerequisites
 
 ```bash
-# Required for all Gemini-gated features
-export GOOGLE_API_KEY=<your-key>
+# At least one provider key is required
+export GITHUB_PAT=github_pat_...        # recommended — gpt-4o, no extra config
+export GOOGLE_API_KEY=<your-key>        # required for memory, artifacts, llm_auditor
+export GROQ_API_KEY=<gsk_...>           # optional fallback
+export NVIDIA_API_KEY=<nvapi-...>       # optional fallback
+export OPENROUTER_API_KEY=<key>         # optional fallback
+export HF_TOKEN=<hf_...>               # optional fallback
 
-# Optional — each unlocks its dedicated agent and failover fallback
-export GROQ_API_KEY=<gsk_...>
-export NVIDIA_API_KEY=<nvapi-...>
-export OPENROUTER_API_KEY=<key>
-export HF_TOKEN=<hf_...>
+# Select a specific provider as primary (default: first configured)
+export PROVIDER_SELECTED=openrouter     # or: github, gemini, groq, nvidia, huggingface
 
 # Zero-key echo fallback (local testing without any real keys)
 export ECHO_FALLBACK_ENABLED=1
@@ -32,13 +34,13 @@ make env
 | `make console` | ADK console (`main.go`) | multi-agent routing, notebook, code pipeline, state |
 | `make test-failover-echo` | Broken Gemini → echo | failover without any key |
 | `make test-failover` | Broken Gemini → real fallback | failover with a fallback key |
-| `tail -f /tmp/go-adk-q-tui.log` | TUI background log | see slog output while TUI runs |
+| `tail -f "$TMPDIR/go-adk-q-tui.log"` | TUI background log | see slog output while TUI runs |
 
 ---
 
 ## 1. Basic Tools (TUI)
 
-**Setup:** `make run` — requires `GOOGLE_API_KEY`
+**Setup:** `make run` — works with any configured provider
 
 Tests `get_weather`, `get_current_time`, `calculate` FunctionTools.
 Expected: each prompt triggers exactly one tool call; response cites tool output.
@@ -412,11 +414,11 @@ Fact-check without the LLM auditor: Is the Eiffel Tower 500 metres tall?
 
 ## 7. Skills (TUI)
 
-**Setup:** `make run` — requires `GOOGLE_API_KEY` and `./skills/` directory present
+**Setup:** `make run` — works with any configured provider; requires `./skills/` directory present
 
-The skills toolset is loaded from `./skills/` at startup; load_skill is injected into
-the agent's tool schema. The LLM calls load_skill when the user's request matches
-a skill's description.
+The skills toolset is loaded from `./skills/` at startup; `list_skills`, `load_skill`,
+and `load_skill_resource` are injected into the agent's tool schema. The LLM calls
+`load_skill` when the user's request matches a skill's description.
 
 ### 7a. go-expert skill
 
@@ -557,6 +559,34 @@ Terminal assistant: write a one-liner to count the number of TODO comments acros
 ```
 
 > Expect: grep -r "TODO" --include="*.go" | wc -l or similar; notes -r flag
+
+### 7d. Verifying a skill was actually called
+
+To confirm `load_skill` fired (not just that the response looks skill-like), grep the log
+while the TUI is running:
+
+```bash
+# In a separate terminal pane
+tail -f "$TMPDIR/go-adk-q-tui.log" | grep -i "load_skill\|list_skills\|skill"
+```
+
+Expected log entries when a skill loads:
+
+| Event | What to look for |
+|-------|-----------------|
+| `list_skills` called | `span=function_tool.execute tool=list_skills` |
+| `load_skill` called | `span=function_tool.execute tool=load_skill name=go-expert` (or other skill name) |
+| `load_skill_resource` called | `span=function_tool.execute tool=load_skill_resource` |
+| Skills toolset init | `INFO skills toolset enabled path=./skills` (at startup) |
+
+To do a one-shot grep after a session:
+
+```bash
+grep "load_skill\|list_skills" "$TMPDIR/go-adk-q-tui.log"
+```
+
+If `load_skill` does not appear in the log, the model answered from training knowledge
+without loading the skill — the response may look correct but is not skill-guided.
 
 **Pass criteria:** each skill response visibly follows the skill's format and guidelines; non-skill questions do not unnecessarily trigger skill loading.
 
@@ -725,7 +755,7 @@ hello
 what is 5 + 5?
 ```
 
-> Expect: answered by the fallback provider (no calculator tool — tools disabled on non-Gemini)
+> Expect: answered by the fallback provider using the `calculate` tool (basic tools are enabled for all providers with function calling)
 
 ```
 tell me a fun fact about Go
@@ -920,7 +950,7 @@ Statement to check: "The Linux kernel was written by Linus Torvalds and first re
 Run this in a separate terminal pane while the TUI is active:
 
 ```bash
-tail -f /tmp/go-adk-q-tui.log
+tail -f "$TMPDIR/go-adk-q-tui.log"
 ```
 
 Expected slog entries to watch for:
@@ -937,16 +967,16 @@ Expected slog entries to watch for:
 
 ```bash
 # Grep for errors only
-grep -i "error\|fatal\|warn" /tmp/go-adk-q-tui.log
+grep -i "error\|fatal\|warn" "$TMPDIR/go-adk-q-tui.log"
 
 # Watch tool call spans
-grep "function_tool" /tmp/go-adk-q-tui.log
+grep "function_tool" "$TMPDIR/go-adk-q-tui.log"
 
 # Watch LLM auditor spans
-grep "critic_agent\|reviser_agent\|llm_auditor" /tmp/go-adk-q-tui.log
+grep "critic_agent\|reviser_agent\|llm_auditor" "$TMPDIR/go-adk-q-tui.log"
 
 # Token usage across all turns
-grep "duration_ms\|attributes" /tmp/go-adk-q-tui.log
+grep "duration_ms\|attributes" "$TMPDIR/go-adk-q-tui.log"
 ```
 
 ---
@@ -1020,6 +1050,7 @@ What tools and skills have been used in this conversation so far?
 | "list / load artifacts / files" | `load_artifacts` |
 | "fact-check / verify / use LLM auditor" | `llm_auditor` sub-agent |
 | "go expert / code reviewer / terminal assistant" | `load_skill` |
+| "what skills are available / list skills" | `list_skills` |
 | "weather + time questions" (console) | `weather_time_agent` |
 | "write / review / refactor code" (console) | `code_pipeline` |
 | "draft / improve / refine document" (console) | `doc_refinement_loop` |
@@ -1032,7 +1063,47 @@ What tools and skills have been used in this conversation so far?
 
 - **In-memory only.** `session.InMemoryService()`, `memory.InMemoryService()`, and `artifact.InMemoryService()` do not persist across process restarts. Every `make run` starts fresh.
 - **TUI has no `save_artifact`.** The TUI agent has `load_artifacts` but not `save_artifact`. Console `notebook_agent` has both. In-memory services are per-process so artifacts saved in console are not visible in TUI.
-- **Non-Gemini providers skip tools.** When `GOOGLE_API_KEY` is not set, the TUI agent runs in text-only mode; weather/time/calculator/memory/artifact/auditor tools are all disabled.
+- **Non-Gemini providers have partial tool support.** Basic tools (`weather`, `time`, `calculator`, `list_skills`, `load_skill`, `load_skill_resource`) are enabled for all providers with function calling. Advanced tools (`preload_memory`, `load_memory`, `load_artifacts`, `llm_auditor`) require `GOOGLE_API_KEY` — these involve multi-step tool chains that non-Gemini models handle less reliably.
 - **LLM Auditor requires ~2 LLM calls.** Critic + Reviser each make one round-trip. Expect 5-15s latency per audit vs 1-3s for a direct answer.
 - **Google Search grounding in critic.** `geminitool.GoogleSearch{}` is wired to the critic agent. If your API key tier does not support grounding, the critic uses training knowledge only and `GroundingMetadata` will be nil — `afterCritic` handles this gracefully (no reference section appended).
 - **Failover echo is testing-only.** `ECHO_FALLBACK_ENABLED=1` returns the user's input verbatim. Never use in production.
+
+---
+
+## 16. TUI Mouse Scroll and Text Copy
+
+**Setup:** `make run` — no API key needed for UI behaviour tests
+
+### 16a. Touchpad / mouse wheel scroll
+
+Scroll up and down through chat history using the touchpad or mouse wheel.
+
+> Expect: viewport scrolls smoothly up and down through message history
+
+Keyboard scroll also works at any time:
+
+| Key | Action |
+|-----|--------|
+| `↑` / `↓` | Scroll one line |
+| `pgup` / `pgdn` | Scroll one page |
+| `ctrl+u` / `ctrl+d` | Scroll half page |
+
+### 16b. Copying text (ctrl+t toggle)
+
+Mouse mode is active by default so touchpad scroll works. When mouse mode is on, the terminal cannot intercept click-drag for native text selection. Use `ctrl+t` to toggle:
+
+1. Press **`ctrl+t`** — status bar shows `Copy mode ON — select text freely  (ctrl+t for scroll)`
+   - Mouse/touchpad scroll stops
+   - Click and drag to select any text, code block, or response → copy with ⌘C (macOS) or your terminal's copy shortcut
+2. Press **`ctrl+t`** again — status bar shows `Scroll mode ON — touchpad scrolls`
+   - Mouse/touchpad scroll resumes
+   - Text selection via click-drag is blocked again
+
+> The footer always shows `ctrl+t: copy mode` as a reminder.
+
+**Pass criteria:**
+
+- Touchpad scroll works without pressing any key (default state)
+- `ctrl+t` disables mouse mode — text can be selected and copied freely
+- `ctrl+t` again re-enables scroll — touchpad works again
+- No other functionality is affected by toggling

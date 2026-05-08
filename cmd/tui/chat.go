@@ -165,6 +165,7 @@ var builtinThemes = []palette{
 // Code block colours are kept as raw TerminalColor values so markdown.go can
 // build custom-width box-drawing borders at render time.
 type styledSet struct {
+	themeIdx   int // index into builtinThemes; forwarded to glamour renderer
 	header     lipgloss.Style
 	sep        lipgloss.Style
 	userLabel  lipgloss.Style
@@ -187,6 +188,7 @@ type styledSet struct {
 
 func makeStyles(p palette) styledSet {
 	return styledSet{
+		// No themeIdx here — callers set it after construction.
 		// Header: bold text on the chrome background.
 		header: lipgloss.NewStyle().Bold(true).
 			Foreground(p.onChrome).Background(p.chrome).Padding(0, 1),
@@ -366,18 +368,19 @@ type statusClearMsg struct{}
 //   - a spinner shown while waiting for the agent
 //
 // Features wired in:
-//   - ↑/↓   shell-style input history cycling
-//   - t      cycle colour theme
-//   - s      open settings overlay (theme + char limit)
-//   - ?/esc  toggle help overlay (rendered inside the viewport)
-//   - ctrl+l clear conversation history
-//   - ctrl+s save conversation to ~/.go-adk-q/session.json
-//   - ctrl+y copy last agent reply to clipboard
+//   - ↑/↓       shell-style input history cycling
+//   - t          cycle colour theme (only when input empty)
+//   - /settings  open settings overlay (theme + char limit)
+//   - /help      toggle help overlay (also ?/esc when input empty)
+//   - esc        close settings overlay / dismiss help
+//   - ctrl+l     clear conversation history
+//   - ctrl+s     save conversation to ~/.go-adk-q/session.json
+//   - ctrl+y     copy last agent reply to clipboard
 //   - streaming responses via channel + recursive tea.Cmd
-//   - markdown code-block rendering via markdown.go
+//   - markdown rendering (bold, headers, lists, code blocks) via markdown.go
 //   - timestamps on every message (HH:MM, right-aligned)
 //   - character counter + token usage in the footer
-//   - mouse-wheel scroll (via tea.WithMouseCellMotion)
+//   - pgup/pgdn/arrow key scroll + mouse-wheel scroll (via tea.WithMouseCellMotion)
 type chatModel struct {
 	viewport  viewport.Model
 	textInput textarea.Model
@@ -405,11 +408,15 @@ type chatModel struct {
 	// Temporary status bar message (auto-cleared after a few seconds).
 	statusMsg string
 
+	// Slash command autocomplete menu.
+	slashMenuIdx int // selected row in the menu (-1 = none)
+
 	// Settings overlay (huh form).
 	settingsMode      bool
 	settingsForm      *huh.Form
 	settingsThemeIdx  int
 	settingsCharLimit int
+	mouseEnabled      bool // tracks mouse mode for ctrl+t toggle
 
 	runner     *runner.Runner
 	sessionSvc session.Service
@@ -419,9 +426,12 @@ type chatModel struct {
 	modelName  string
 }
 
-// styles returns the styledSet for the current theme.  Called once per frame.
+// styles returns the styledSet for the current theme with themeIdx populated.
+// Called once per frame.
 func (m chatModel) styles() styledSet {
-	return makeStyles(builtinThemes[m.themeIdx])
+	s := makeStyles(builtinThemes[m.themeIdx])
+	s.themeIdx = m.themeIdx
+	return s
 }
 
 // newChatModel constructs the initial chatModel.  The viewport is not yet
@@ -429,7 +439,7 @@ func (m chatModel) styles() styledSet {
 func newChatModel(r *runner.Runner, svc session.Service, memorySvc memory.Service, modelName string) chatModel {
 	ti := textarea.New()
 	ti.Placeholder = "Type a message and press Enter…"
-	ti.Prompt = "> "      // prepended to every wrapped line
+	ti.Prompt = "  "     // indent only — no visible prompt glyph
 	ti.ShowLineNumbers = false
 	ti.CharLimit = 2000
 	ti.KeyMap.InsertNewline.SetEnabled(false) // Enter sends; Shift+Enter would insert newline
@@ -441,17 +451,19 @@ func newChatModel(r *runner.Runner, svc session.Service, memorySvc memory.Servic
 	sp.Style = makeStyles(builtinThemes[0]).loading
 
 	return chatModel{
-		textInput:  ti,
-		spinner:    sp,
-		userID:     "tui-user",
-		sessionID:  "tui-session",
-		runner:     r,
-		sessionSvc: svc,
-		memorySvc:  memorySvc,
-		historyIdx: -1,
+		textInput:    ti,
+		spinner:      sp,
+		userID:       "tui-user",
+		sessionID:    "tui-session",
+		runner:       r,
+		sessionSvc:   svc,
+		memorySvc:    memorySvc,
+		historyIdx:   -1,
+		slashMenuIdx: 0,
+		mouseEnabled: true,
 		msgs: []chatMsg{{
 			role: "system",
-			text: "Connected • " + modelName,
+			text: "Session started",
 			at:   time.Now(),
 		}},
 		modelName: modelName,
@@ -530,6 +542,12 @@ func (m chatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// ── esc: dismiss help overlay ─────────────────────────────────
 		case "esc":
+			// Close slash menu if open.
+			if slashMenuVisible(m.textInput.Value()) {
+				m.textInput.Reset()
+				m.slashMenuIdx = 0
+				return m, nil
+			}
 			if m.showHelp {
 				m.showHelp = false
 				m.refreshViewport()
@@ -540,13 +558,29 @@ func (m chatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+l":
 			m.msgs = []chatMsg{{
 				role: "system",
-				text: "Connected • " + m.modelName,
+				text: "Session started",
 				at:   time.Now(),
 			}}
 			m.streamingText = ""
 			m.showHelp = false
 			m.refreshViewport()
 			return m, nil
+
+		// ── ctrl+t: toggle mouse on/off for scroll vs copy ───────────
+		case "ctrl+t":
+			m.mouseEnabled = !m.mouseEnabled
+			if m.mouseEnabled {
+				m.statusMsg = "Scroll mode — touchpad scrolls"
+				return m, tea.Batch(
+					oneShotTimer(2*time.Second, statusClearMsg{}),
+					func() tea.Msg { return tea.EnableMouseCellMotion() },
+				)
+			}
+			m.statusMsg = "Copy mode — select text freely  (ctrl+t to scroll)"
+			return m, tea.Batch(
+				oneShotTimer(3*time.Second, statusClearMsg{}),
+				func() tea.Msg { return tea.DisableMouse() },
+			)
 
 		// ── ctrl+s: save session ──────────────────────────────────────
 		case "ctrl+s":
@@ -591,70 +625,162 @@ func (m chatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "t":
 			if m.textInput.Value() == "" {
 				m.themeIdx = (m.themeIdx + 1) % len(builtinThemes)
+				invalidateRendererCache()
 				m.spinner.Style = m.styles().loading // keep spinner colour in sync
 				m.refreshViewport()
 				return m, nil
 			}
 
-		// ── s: open settings overlay ──────────────────────────────────
-		case "s":
-			if m.textInput.Value() == "" && !m.loading {
+		// ── ↑: slash menu navigation OR input history ────────────────
+		case "up":
+			val := m.textInput.Value()
+			if slashMenuVisible(val) {
+				matches := slashMatches(val)
+				if m.slashMenuIdx > 0 {
+					m.slashMenuIdx--
+				}
+				_ = matches
+				return m, nil
+			}
+			if !m.loading && len(m.inputHistory) > 0 {
+				if m.historyIdx == -1 {
+					m.inputDraft = m.textInput.Value()
+					m.historyIdx = len(m.inputHistory) - 1
+				} else if m.historyIdx > 0 {
+					m.historyIdx--
+				}
+				m.textInput.SetValue(m.inputHistory[m.historyIdx])
+				m.textInput.CursorEnd()
+				if m.width > 7 {
+					m.textInput.SetHeight(calcInputHeight(m.textInput.Value(), m.width-7, 5))
+				}
+				return m, nil
+			}
+			// No history → fall through so the viewport can scroll.
+
+		// ── ↓: slash menu navigation OR input history ────────────────
+		case "down":
+			val := m.textInput.Value()
+			if slashMenuVisible(val) {
+				matches := slashMatches(val)
+				if m.slashMenuIdx < len(matches)-1 {
+					m.slashMenuIdx++
+				}
+				return m, nil
+			}
+			if m.historyIdx != -1 {
+				if m.historyIdx < len(m.inputHistory)-1 {
+					m.historyIdx++
+					m.textInput.SetValue(m.inputHistory[m.historyIdx])
+				} else {
+					m.historyIdx = -1
+					m.textInput.SetValue(m.inputDraft)
+					m.inputDraft = ""
+				}
+				m.textInput.CursorEnd()
+				if m.width > 7 {
+					m.textInput.SetHeight(calcInputHeight(m.textInput.Value(), m.width-7, 5))
+				}
+				return m, nil
+			}
+			// Not browsing → fall through so the viewport can scroll.
+
+		// ── tab: complete slash command ───────────────────────────────
+		case "tab":
+			val := m.textInput.Value()
+			if slashMenuVisible(val) {
+				matches := slashMatches(val)
+				idx := m.slashMenuIdx
+				if idx >= len(matches) {
+					idx = 0
+				}
+				m.textInput.SetValue(matches[idx].name)
+				m.textInput.CursorEnd()
+				m.slashMenuIdx = 0
+				return m, nil
+			}
+
+		// ── enter: send message or execute slash command ─────────────
+		case "enter":
+			if m.loading {
+				break
+			}
+
+			// If the slash menu is open and has a selection, complete it
+			// unless the user has already typed the full command name.
+			val := m.textInput.Value()
+			if slashMenuVisible(val) {
+				matches := slashMatches(val)
+				if len(matches) > 1 {
+					// Multiple matches: complete instead of executing.
+					idx := m.slashMenuIdx
+					if idx >= len(matches) {
+						idx = 0
+					}
+					m.textInput.SetValue(matches[idx].name)
+					m.textInput.CursorEnd()
+					m.slashMenuIdx = 0
+					return m, nil
+				}
+				// Exactly one match: fall through to execute it below.
+			}
+
+			input := strings.TrimSpace(m.textInput.Value())
+			if input == "" {
+				break
+			}
+			m.slashMenuIdx = 0
+
+			// ── Slash commands ─────────────────────────────────────────
+			switch strings.ToLower(input) {
+			case "/settings":
+				m.textInput.Reset()
 				m.settingsThemeIdx = m.themeIdx
 				m.settingsCharLimit = m.textInput.CharLimit
 				m.settingsForm = buildSettingsForm(&m.settingsThemeIdx, &m.settingsCharLimit).
 					WithWidth(m.width - 4)
 				m.settingsMode = true
 				return m, m.settingsForm.Init()
+
+			case "/help":
+				m.textInput.Reset()
+				m.showHelp = !m.showHelp
+				m.refreshViewport()
+				return m, nil
+
+			case "/clear":
+				m.textInput.Reset()
+				m.msgs = []chatMsg{{
+					role: "system",
+					text: "Session started",
+					at:   time.Now(),
+				}}
+				m.streamingText = ""
+				m.showHelp = false
+				m.refreshViewport()
+				return m, nil
+
+			case "/theme":
+				m.textInput.Reset()
+				m.themeIdx = (m.themeIdx + 1) % len(builtinThemes)
+				invalidateRendererCache()
+				m.spinner.Style = m.styles().loading
+				m.refreshViewport()
+				return m, nil
+
+			case "/skills":
+				m.textInput.Reset()
+				m.showHelp = false
+				m.msgs = append(m.msgs, chatMsg{
+					role: "system",
+					text: listSkillsSummary(),
+					at:   time.Now(),
+				})
+				m.refreshViewport()
+				return m, nil
 			}
 
-		// ── ↑: walk backward through input history ────────────────────
-		case "up":
-			if !m.loading && len(m.inputHistory) > 0 {
-				if m.historyIdx == -1 {
-					// Enter browse mode: save the current draft.
-					m.inputDraft = m.textInput.Value()
-					m.historyIdx = len(m.inputHistory) - 1
-				} else if m.historyIdx > 0 {
-					m.historyIdx--
-				}
-			m.textInput.SetValue(m.inputHistory[m.historyIdx])
-			m.textInput.CursorEnd()
-			if m.width > 7 {
-				m.textInput.SetHeight(calcInputHeight(m.textInput.Value(), m.width-7, 5))
-			}
-			return m, nil // intercept; don't scroll the viewport
-			}
-			// No history → fall through so the viewport can scroll.
-
-		// ── ↓: walk forward through input history ────────────────────
-		case "down":
-			if m.historyIdx != -1 {
-				if m.historyIdx < len(m.inputHistory)-1 {
-					m.historyIdx++
-					m.textInput.SetValue(m.inputHistory[m.historyIdx])
-				} else {
-					// End of history: restore the saved draft.
-					m.historyIdx = -1
-					m.textInput.SetValue(m.inputDraft)
-					m.inputDraft = ""
-				}
-			m.textInput.CursorEnd()
-			if m.width > 7 {
-				m.textInput.SetHeight(calcInputHeight(m.textInput.Value(), m.width-7, 5))
-			}
-			return m, nil // intercept
-			}
-			// Not browsing → fall through so the viewport can scroll.
-
-		// ── enter: send message ───────────────────────────────────────
-		case "enter":
-			if m.loading {
-				break
-			}
-			input := strings.TrimSpace(m.textInput.Value())
-			if input == "" {
-				break
-			}
+			// Not a slash command — send to agent.
 			m.showHelp = false
 			// Record in history; avoid consecutive duplicates.
 			if len(m.inputHistory) == 0 || m.inputHistory[len(m.inputHistory)-1] != input {
@@ -680,6 +806,7 @@ func (m chatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				at:   time.Now(),
 			})
 			m.streamingText = ""
+			m.refreshViewport()
 
 		case msg.done:
 			m.loading = false
@@ -689,46 +816,69 @@ func (m chatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.msgs = append(m.msgs, chatMsg{role: "agent", text: text, at: time.Now()})
 			m.streamingText = ""
-			// Accumulate token counts from the completed turn.
 			m.totalPromptTokens += msg.promptTokens
 			m.totalCandidateTokens += msg.candidateTokens
+			// Scroll to the START of the completed reply so long responses
+			// (code blocks, lists) are visible from the top rather than being
+			// scrolled past with only the last few lines in view.
+			m.refreshViewportShowLast()
 
 		default:
 			m.streamingText += msg.text
 			if msg.next != nil {
 				cmds = append(cmds, msg.next)
 			}
+			m.refreshViewport()
 		}
-		m.refreshViewport()
 
 	// ── Status bar expiry ─────────────────────────────────────────────────
 	case statusClearMsg:
 		m.statusMsg = ""
-		// No explicit viewport refresh: the footer reads statusMsg directly
-		// and will update on the next natural redraw (next key or tick).
 
 	// ── Spinner tick ──────────────────────────────────────────────────────
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
-		// Keep ticking only while loading AND no streaming text is visible.
-		// Once text is showing we don't need spinner redraws.
 		if m.loading && m.streamingText == "" {
 			cmds = append(cmds, cmd)
 		}
+	} // end switch msg.(type)
+
+	// ── Route mouse events away from the textarea ─────────────────────────
+	//
+	// tea.MouseMsg (scroll wheel, clicks) must NOT be forwarded to the
+	// textarea: the bubbles/textarea widget does not handle mouse events and
+	// passes the raw SGR escape bytes straight into the text value, producing
+	// garbage like "[<64;58;35M" whenever the user scrolls over the input box.
+	//
+	// Mouse wheel events are routed exclusively to the viewport so scrolling
+	// always works regardless of where the pointer is positioned.
+	// Non-wheel mouse messages (clicks, moves) are silently discarded for the
+	// textarea — they carry no useful action for a text input field.
+	if mouseMsg, ok := msg.(tea.MouseMsg); ok {
+		if mouseMsg.Action == tea.MouseActionPress || mouseMsg.Action == tea.MouseActionRelease {
+			// clicks/motion: only viewport gets them
+		}
+		// Always let the viewport handle scroll wheel and other mouse events.
+		var vpCmd tea.Cmd
+		m.viewport, vpCmd = m.viewport.Update(mouseMsg)
+		cmds = append(cmds, vpCmd)
+		// Do NOT forward mouse events to textInput.
+	} else {
+		// Non-mouse events: forward to both textarea and viewport as normal.
+		var tiCmd tea.Cmd
+		m.textInput, tiCmd = m.textInput.Update(msg)
+		cmds = append(cmds, tiCmd)
+
+		var vpCmd tea.Cmd
+		m.viewport, vpCmd = m.viewport.Update(msg)
+		cmds = append(cmds, vpCmd)
 	}
 
-	// Always forward events to the sub-models so they update their own state.
-	var tiCmd tea.Cmd
-	m.textInput, tiCmd = m.textInput.Update(msg)
-	cmds = append(cmds, tiCmd)
-
-	// Dynamically grow/shrink the input area as the user types.
-	// ">" prompt is 2 chars; SetWidth arg is m.width-5; inner text width = m.width-7.
+	// Dynamic textarea height + viewport resize after any input change.
 	if m.ready && m.width > 7 {
 		newH := calcInputHeight(m.textInput.Value(), m.width-7, 5)
 		m.textInput.SetHeight(newH)
-		// Recompute viewport height to account for the changed input height.
 		s2 := m.styles()
 		headerH := lipgloss.Height(m.headerView(s2))
 		footerH := lipgloss.Height(m.footerView(s2))
@@ -738,19 +888,23 @@ func (m chatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	var vpCmd tea.Cmd
-	m.viewport, vpCmd = m.viewport.Update(msg)
-	cmds = append(cmds, vpCmd)
-
 	return m, tea.Batch(cmds...)
 }
 
 // updateSettings handles all input events while the settings overlay is open.
-// ctrl+c quits the app; esc cancels without applying; form completion applies.
+// ctrl+c quits the app; esc always cancels without applying; form completion applies.
 func (m chatModel) updateSettings(msg tea.Msg) (tea.Model, tea.Cmd) {
-	// Always allow quit.
-	if km, ok := msg.(tea.KeyMsg); ok && km.String() == "ctrl+c" {
-		return m, tea.Quit
+	if km, ok := msg.(tea.KeyMsg); ok {
+		switch km.String() {
+		case "ctrl+c":
+			return m, tea.Quit
+		case "esc":
+			// Always close settings on esc — don't forward to huh which may
+			// consume it for field navigation without closing the overlay.
+			m.settingsMode = false
+			m.settingsForm = nil
+			return m, nil
+		}
 	}
 
 	formModel, cmd := m.settingsForm.Update(msg)
@@ -760,15 +914,18 @@ func (m chatModel) updateSettings(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case huh.StateCompleted:
 		// Apply the chosen values.
 		m.themeIdx = m.settingsThemeIdx
+		invalidateRendererCache()
 		m.textInput.CharLimit = m.settingsCharLimit
 		m.spinner.Style = m.styles().loading
 		m.settingsMode = false
+		m.settingsForm = nil
 		m.refreshViewport()
 		return m, nil
 
 	case huh.StateAborted:
-		// User pressed esc — discard changes.
+		// huh internally aborted (e.g. ctrl+c inside form) — discard changes.
 		m.settingsMode = false
+		m.settingsForm = nil
 		return m, nil
 	}
 
@@ -792,6 +949,7 @@ func (m chatModel) View() string {
 	return lipgloss.JoinVertical(lipgloss.Left,
 		m.headerView(s),
 		m.viewport.View(),
+		m.slashMenuViewIfVisible(s),
 		m.inputView(s),
 		m.footerView(s),
 	)
@@ -800,25 +958,34 @@ func (m chatModel) View() string {
 // ── Sub-views ─────────────────────────────────────────────────────────────────
 
 func (m chatModel) headerView(s styledSet) string {
-	title := "  go-adk-q  •  " + m.modelName
+	// "Connected" always shown in green regardless of theme.
+	connected := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("#a6e3a1")). // green — same across all themes
+		Background(s.header.GetBackground()).
+		Padding(0, 1).
+		Render("Connected")
 
-	// Only show a scroll hint when the user has scrolled up and there is
-	// content below the visible area.  "0%" / "100%" are meaningless noise
-	// — a directional cue is unambiguous and space-efficient.
-	var right string
-	if !m.viewport.AtBottom() {
-		right = "▼ more  "
-	}
-
-	// Right-align `right` within the header.  The header style has
-	// Padding(0,1) which accounts for the 2-column inset already applied
-	// by Width(m.width).Render().
 	inner := m.width - 2
-	pad := inner - lipgloss.Width(title) - lipgloss.Width(right)
-	if pad < 1 {
-		pad = 1
+	pad := inner - lipgloss.Width(connected)
+	if pad < 0 {
+		pad = 0
 	}
-	return s.header.Width(m.width).Render(title + strings.Repeat(" ", pad) + right)
+	fill := lipgloss.NewStyle().
+		Background(s.header.GetBackground()).
+		Render(strings.Repeat(" ", pad))
+
+	return lipgloss.NewStyle().Width(m.width).Background(s.header.GetBackground()).
+		Render(connected + fill)
+}
+
+func (m chatModel) slashMenuViewIfVisible(s styledSet) string {
+	val := m.textInput.Value()
+	if !slashMenuVisible(val) {
+		return ""
+	}
+	matches := slashMatches(val)
+	return slashMenuView(s, matches, m.slashMenuIdx, m.width)
 }
 
 func (m chatModel) inputView(s styledSet) string {
@@ -850,6 +1017,21 @@ func (m chatModel) footerView(s styledSet) string {
 	counterW := lipgloss.Width(counter)
 
 	// ── Hint text (left side, first line) ────────────────────────────────
+	// ── Scroll indicator (right side, inline with hint) ──────────────────
+	var scrollIndicator string
+	if !m.viewport.AtBottom() {
+		pct := 0
+		if m.viewport.TotalLineCount() > 0 {
+			pct = int(m.viewport.ScrollPercent() * 100)
+		}
+		scrollIndicator = fmt.Sprintf(" ▼ %d%%", pct)
+	}
+	scrollW := lipgloss.Width(scrollIndicator)
+	scrollRendered := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("#f9e2af")).
+		Render(scrollIndicator)
+
 	var hint string
 	switch {
 	case m.statusMsg != "":
@@ -857,10 +1039,10 @@ func (m chatModel) footerView(s styledSet) string {
 	case m.loading:
 		hint = m.spinner.View() + " Thinking…  •  ctrl+c: quit"
 	default:
-		hint = "enter: send  •  ↑/↓: history  •  s: settings  •  ?: help  •  t: theme  •  ctrl+l: clear  •  ctrl+c: quit"
+		hint = "enter: send  •  ↑/↓: scroll  •  / for commands  •  ctrl+t: copy mode  •  ctrl+c: quit"
 	}
 
-	hintW := m.width - counterW
+	hintW := m.width - counterW - scrollW
 	if hintW < 1 {
 		hintW = 1
 	}
@@ -873,21 +1055,22 @@ func (m chatModel) footerView(s styledSet) string {
 		hintRendered = s.help.Width(hintW).MaxWidth(hintW).Render(hint)
 	}
 
-	line1 := hintRendered + counter
+	line1 := hintRendered + scrollRendered + counter
 
-	// ── Token usage (second line) ─────────────────────────────────────────
-	var line2 string
+	// ── Provider / model + token usage (second line) ─────────────────────
+	var tokenInfo string
 	if m.totalPromptTokens > 0 || m.totalCandidateTokens > 0 {
-		tokenInfo := fmt.Sprintf(
-			" tokens  in: %d  out: %d  total: %d",
+		tokenInfo = fmt.Sprintf(
+			" %s  •  tokens  in: %d  out: %d  total: %d",
+			m.modelName,
 			m.totalPromptTokens,
 			m.totalCandidateTokens,
 			m.totalPromptTokens+m.totalCandidateTokens,
 		)
-		line2 = s.system.Width(m.width).MaxWidth(m.width).Render(tokenInfo)
 	} else {
-		line2 = s.system.Width(m.width).MaxWidth(m.width).Render(" tokens  —")
+		tokenInfo = fmt.Sprintf(" %s  •  tokens  —", m.modelName)
 	}
+	line2 := s.system.Width(m.width).MaxWidth(m.width).Render(tokenInfo)
 
 	return line1 + "\n" + line2
 }
@@ -911,17 +1094,113 @@ func (m chatModel) settingsFooter(s styledSet) string {
 
 // ── Viewport content ──────────────────────────────────────────────────────────
 
-// refreshViewport re-renders the viewport content and scrolls to the bottom.
-// It switches between the help overlay and the message history depending on
-// m.showHelp.
+// refreshViewport re-renders the viewport content.
+//
+// Scrolling strategy:
+//   - Help overlay  → always GotoBottom (content is short)
+//   - Loading/streaming → GotoBottom so new chunks stream into view
+//   - After a completed agent reply → scrollToLastMessage so the START of the
+//     reply is visible; the user can scroll down to read code blocks below
+//   - Everything else (user msg, error, system) → GotoBottom
 func (m *chatModel) refreshViewport() {
 	s := m.styles()
 	if m.showHelp {
 		m.viewport.SetContent(m.helpView(s))
-	} else {
-		m.viewport.SetContent(m.renderMessages(s))
+		m.viewport.GotoBottom()
+		return
 	}
+	content := m.renderMessages(s)
+	m.viewport.SetContent(content)
 	m.viewport.GotoBottom()
+}
+
+// refreshViewportShowLast re-renders and scrolls to the TOP of the last agent
+// message, so long responses (code blocks, lists) start at the top of the
+// visible area rather than being scrolled past.
+//
+// If the last agent reply fits entirely within the viewport height, we fall
+// back to GotoBottom so short replies don't leave dead space at the bottom.
+func (m *chatModel) refreshViewportShowLast() {
+	if m.showHelp {
+		m.refreshViewport()
+		return
+	}
+
+	s := m.styles()
+	w := m.width
+	if w < 20 {
+		w = 80
+	}
+	contentW := w - 4
+
+	// Build the content up to (but not including) the last agent message so
+	// we can measure its line offset.  We need to count rendered lines, not
+	// raw bytes, so we render each message individually.
+	var before strings.Builder
+	lastAgentIdx := -1
+	for i, msg := range m.msgs {
+		if msg.role == "agent" {
+			lastAgentIdx = i
+		}
+	}
+
+	if lastAgentIdx < 0 {
+		// No agent message yet — just go to bottom.
+		content := m.renderMessages(s)
+		m.viewport.SetContent(content)
+		m.viewport.GotoBottom()
+		return
+	}
+
+	// Render everything before the last agent message.
+	for i, msg := range m.msgs {
+		if i == lastAgentIdx {
+			break
+		}
+		if i > 0 {
+			before.WriteByte('\n')
+		}
+		switch msg.role {
+		case "user":
+			before.WriteString(labelLine(s.userLabel, s.system, "You", msg.at, contentW))
+			before.WriteString(s.userText.PaddingLeft(2).Width(contentW).Render(msg.text) + "\n")
+		case "agent":
+			before.WriteString(labelLine(s.agentLabel, s.system, "Agent", msg.at, contentW))
+			before.WriteString(renderMarkdown(s, msg.text, contentW, s.agentText))
+		case "error":
+			before.WriteString(labelLine(s.errorLabel, s.system, "Error", msg.at, contentW))
+			wrapped := hardWrapText(msg.text, contentW-2)
+			before.WriteString(s.errorText.PaddingLeft(2).Render(wrapped) + "\n")
+		case "system":
+			before.WriteString(s.system.PaddingLeft(2).Width(contentW).Render(msg.text) + "\n")
+		}
+	}
+
+	// The Y offset is the number of rendered lines before the last agent msg.
+	// strings.Count(s, "\n") counts newline characters.  The loop above already
+	// writes the inter-message separator "\n" (line 1157), so that byte is already
+	// included in beforeStr — we must NOT add an extra +1 here.
+	beforeStr := before.String()
+	yOffset := strings.Count(beforeStr, "\n")
+
+	// Render the last agent reply to measure its height.
+	lastMsg := m.msgs[lastAgentIdx]
+	var lastBlock strings.Builder
+	lastBlock.WriteString(labelLine(s.agentLabel, s.system, "Agent", lastMsg.at, contentW))
+	lastBlock.WriteString(renderMarkdown(s, lastMsg.text, contentW, s.agentText))
+	lastH := strings.Count(lastBlock.String(), "\n") + 1
+
+	// Full content for SetContent.
+	full := m.renderMessages(s)
+	m.viewport.SetContent(full)
+
+	if lastH <= m.viewport.Height {
+		// Short reply fits: scroll to bottom so no dead space below.
+		m.viewport.GotoBottom()
+	} else {
+		// Long reply: position viewport so the label line is at the top.
+		m.viewport.SetYOffset(yOffset)
+	}
 }
 
 // helpView renders the keyboard shortcut reference and theme colour picker
@@ -933,16 +1212,21 @@ func (m chatModel) helpView(s styledSet) string {
 
 	bindings := [][2]string{
 		{"enter", "Send message"},
+		{"/settings", "Open settings overlay (theme, char limit)"},
+		{"/help", "Toggle this help overlay"},
+		{"/clear", "Clear conversation history"},
+		{"/theme", "Cycle colour theme"},
+		{"/skills", "List available agent skills"},
 		{"↑ / ↓", "Browse sent message history"},
-		{"? / esc", "Toggle this help overlay"},
-		{"t", "Cycle colour theme"},
-		{"s", "Open settings (theme, char limit)"},
+		{"? / esc", "Toggle help (when input empty)"},
+		{"t", "Cycle colour theme (when input empty)"},
 		{"ctrl+l", "Clear conversation history"},
 		{"ctrl+s", "Save conversation → ~/.go-adk-q/session.json"},
 		{"ctrl+y", "Copy last agent reply to clipboard"},
+		{"shift+drag", "Select and copy any text (works natively, no mouse mode)"},
 		{"ctrl+c", "Quit"},
 		{"pgup / pgdn", "Scroll message history"},
-		{"mouse scroll", "Scroll message history"},
+		{"↑ / ↓", "Scroll or browse input history"},
 	}
 	for _, b := range bindings {
 		k := s.prompt.Render(fmt.Sprintf("  %-16s", b[0]))
@@ -967,7 +1251,7 @@ func (m chatModel) helpView(s styledSet) string {
 			Render(marker + " " + t.name)
 	}
 	sb.WriteString("  " + strings.Join(badges, "  ") + "\n\n")
-	sb.WriteString(s.system.Render("  Press t to cycle  •  s for settings  •  ? or esc to close") + "\n")
+	sb.WriteString(s.system.Render("  Press t to cycle  •  /theme  •  /settings for full settings  •  /help or esc to close") + "\n")
 
 	return sb.String()
 }
@@ -993,7 +1277,7 @@ func (m chatModel) renderMessages(s styledSet) string {
 	if w < 20 {
 		w = 80
 	}
-	contentW := w - 1
+	contentW := w - 4 // leave glamour room for its 2-col left margin
 
 	if len(m.msgs) == 0 && !m.loading {
 		return s.system.Render("  No messages yet.")
@@ -1183,9 +1467,6 @@ func runChat(r *runner.Runner, svc session.Service, memorySvc memory.Service, mo
 	m := newChatModel(r, svc, memorySvc, modelName)
 	p := tea.NewProgram(m,
 		tea.WithAltScreen(),
-		// WithMouseCellMotion lets the viewport's built-in mouse-wheel handler
-		// scroll the history.  Text selection still works via shift-click in
-		// most terminals.
 		tea.WithMouseCellMotion(),
 	)
 	_, err := p.Run()

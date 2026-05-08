@@ -7,6 +7,7 @@
 #   make console                   ADK built-in text console     (go run . console)
 #   make web                       browser dev-UI + API   (web webui api, http://localhost:8080)
 #   make api                       REST API server only   (web api,       http://localhost:8080)
+#   make genkit-start              Genkit developer UI    (requires Node.js / npx)
 #   make test                      run all tests
 #   make vet                       run go vet
 #   make lint                      run golangci-lint (install: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest)
@@ -221,6 +222,42 @@ verify-elf: ## Run 'file' on built linux binaries; print glibc-check instruction
 	@echo "    readelf -d <binary> | grep NEEDED    # expect: libc.so.6 for CGO builds"
 
 # ── run modes ─────────────────────────────────────────────────────────────────
+
+# genkit-start: launches the Genkit developer UI via the genkit CLI tool.
+#
+# How it works:
+#   GENKIT_ENV=dev      tells the Go process to start the Reflection API on
+#                       port 3100 (or the next available port, or
+#                       $GENKIT_REFLECTION_PORT if set).
+#   npx genkit start    launches the Genkit dev-tools UI (port 4000) and spawns
+#                       the Go process as a child, connecting to the Reflection
+#                       API automatically.
+#
+# Prerequisites:
+#   Node.js + npm on PATH (npx is included with npm ≥ 5.2)
+#
+# Optional env vars:
+#   GENKIT_REFLECTION_PORT  override the reflection API port (default: 3100)
+#
+.PHONY: genkit-start
+genkit-start: check-npx ## Launch Genkit developer UI (requires Node.js / npx)
+	GENKIT_ENV=dev npx genkit start -- $(GO) run $(GOFLAGS) .
+
+.PHONY: check-npx
+check-npx:
+	@command -v npx >/dev/null 2>&1 || { \
+	  echo ""; \
+	  echo "  ERROR: 'npx' not found on PATH."; \
+	  echo ""; \
+	  echo "  npx is required to launch the Genkit developer UI."; \
+	  echo "  Install Node.js (which includes npm/npx):"; \
+	  echo "    macOS:  brew install node"; \
+	  echo "    Linux:  https://nodejs.org/en/download/package-manager"; \
+	  echo ""; \
+	  exit 1; \
+	}
+	@printf "  npx %s found\n" "$$(npx --version 2>/dev/null)"
+
 .PHONY: chat
 chat: ## Start Bubbletea/Lipgloss TUI chat (full-terminal UI with spinner and colours)
 	$(GO) run $(GOFLAGS) ./cmd/tui chat

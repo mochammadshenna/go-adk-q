@@ -79,14 +79,46 @@ const (
 	// DefaultModel is the recommended starting point: GPT-4o offers the best
 	// balance of speed, capability, and tool-calling reliability on the
 	// GitHub Models endpoint.
-	// TESTED MODELS: "gpt-4o",
-	// "gpt-4o-mini", "o3-mini",
-	// "Meta-Llama-3.1-405B-Instruct",
-	// "Meta-Llama-3.1-8B-Instruct",
-	// "Cohere-command-r-plus-08-2024",
-	// "DeepSeek-V3-0324",
-	// "Llama-4-Scout-17B-16E-Instruct"
-	DefaultModel = "gpt-4o"
+	// TESTED MODELS:
+	// TODO : DO NOT NEED config completion tokens 1000, reasoning effort low, temperature 0.7, top_p 0.9 for some models, need to verify with GitHub Models team which models need those configs and which do not
+	// DefaultModel = "Codestral-2501"
+	// DefaultModel = "Ministral-3B"
+	// DefaultModel = "mistral-small-2503"
+	// DefaultModel = "mistral-medium-2505"
+	// DefaultModel = "gpt-4o"
+	// DefaultModel = "gpt-4o-mini"
+	// DefaultModel = "gpt-4.1"
+	// DefaultModel = "gpt-4.1-mini"
+	// DefaultModel = "gpt-4.1-nano"
+	// DefaultModel = "gpt-5"
+	// DefaultModel = "gpt-5-mini"
+	// DefaultModel = "gpt-5-nano"
+	// DefaultModel = "gpt-5-chat"
+
+	// TODO  can with and without config completion tokens
+	// DefaultModel = "o3-mini"
+	// DefaultModel = "Meta-Llama-3.1-405B-Instruct"
+	// DefaultModel = "Meta-Llama-3.1-8B-Instruct"
+	// DefaultModel = "Llama-3.2-11B-Vision-Instruct"
+	// DefaultModel = "Llama-3.2-90B-Vision-Instruct"
+	// DefaultModel = "Llama-3.3-70B-Instruct"
+	DefaultModel = "Llama-4-Maverick-17B-128E-Instruct-FP8"
+	// DefaultModel = "Llama-4-Scout-17B-16E-Instruct"
+	// DefaultModel = "Cohere-command-r-08-2024"
+	// DefaultModel = "Cohere-command-r-plus-08-2024"
+	// DefaultModel = "Cohere-command-a"
+	// DefaultModel = "DeepSeek-R1"
+	// DefaultModel = "DeepSeek-R1-0528"
+	// DefaultModel = "DeepSeek-V3-0324"
+	// DefaultModel = "Phi-4"
+	// DefaultModel = "Phi-4-mini-instruct"
+	// DefaultModel = "Phi-4-multimodal-instruct"
+	// DefaultModel = "Phi-4-mini-reasoning"
+	// DefaultModel = "Phi-4-reasoning"
+	// DefaultModel = "AI21-Jamba-1.5-Large"
+	// DefaultModel = "AI21-Jamba-Instruct"
+	// DefaultModel = "claude-3-5-sonnet@20240620"
+	// DefaultModel = "Meta-Llama-3.1-405B-Instruct"
 
 	baseURL  = "https://models.inference.ai.azure.com"
 	provider = "github-models"

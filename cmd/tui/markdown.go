@@ -1,36 +1,556 @@
 package main
 
 import (
-	"regexp"
 	"strings"
+	"sync"
 
+	"github.com/charmbracelet/glamour"
+	"github.com/charmbracelet/glamour/ansi"
 	"github.com/charmbracelet/lipgloss"
 )
 
-// ── Markdown renderer ─────────────────────────────────────────────────────────
+// ── Glamour-backed markdown renderer ─────────────────────────────────────────
 //
-// Handles the subset of Markdown that LLMs commonly produce:
+// glamour (github.com/charmbracelet/glamour v0.8.1) provides full CommonMark +
+// GFM rendering via goldmark: headings, bold, italic, strikethrough, inline
+// code, fenced code blocks with Chroma syntax highlighting, tables, ordered
+// and unordered lists, blockquotes, task lists, and horizontal rules.
 //
-//   - Fenced code blocks  (``` … ```) with an optional language tag
-//   - Inline code spans   (`code`)
-//   - Plain prose between blocks (word-wrapped by lipgloss)
+// Design decisions:
 //
-// Code blocks are rendered as a bordered box using Unicode box-drawing
-// characters.  The language tag, when present, is inlined into the top border:
+//  1. TermRenderer cache — constructing a renderer is non-trivial (goldmark
+//     init + Chroma setup).  We cache by (themeIdx, wordWrap) so the same
+//     renderer is reused across frames and streaming chunks.
 //
-//   ╭─ go ──────────────────────────────────────────╮
-//   │                                               │
-//   │  func main() {                                │
-//   │      fmt.Println("Hello, World!")             │
-//   │  }                                            │
-//   │                                               │
-//   ╰───────────────────────────────────────────────╯
+//  2. Word-wrap — glamour wraps at the given width and adds its own 2-column
+//     left margin.  We pass contentW (the full available width) and let
+//     glamour handle its own margin, then trim the leading/trailing blank lines
+//     it emits so spacing stays consistent with the rest of the viewport.
 //
-// The parser is streaming-safe: an unclosed fence at EOF is rendered as an
-// in-progress code block so the partial output stays coherent while tokens
-// arrive from the model.
+//  3. Streaming safety — glamour / goldmark handles partial (unclosed) fences
+//     gracefully; no special streaming logic is needed here.
+//
+//  4. Fallback — if glamour fails for any reason, we fall back to plain
+//     lipgloss-wrapped text so the UI never goes blank.
+//
+//  5. parseSegments is retained because smartCopy in chat.go uses it to
+//     locate the first code fence for clipboard copy.  It is NOT used for
+//     rendering anymore.
+//
+//  6. Custom StyleConfig — each theme gets a hand-crafted ansi.StyleConfig
+//     derived from its palette, so headings, code blocks, links, and
+//     blockquotes all match the active colour scheme precisely.
 
-// ── Parser ────────────────────────────────────────────────────────────────────
+// ── helpers matching glamour's internal style helpers ─────────────────────────
+
+func strPtr(s string) *string { return &s }
+func boolPtr(b bool) *bool    { return &b }
+func uintPtr(u uint) *uint    { return &u }
+
+// ── Per-theme glamour StyleConfig ─────────────────────────────────────────────
+//
+// Each config is tuned to its palette.  The Chroma theme inside CodeBlock
+// controls syntax-highlight colours; we pick well-known Chroma themes that
+// complement each palette.
+//
+// Chroma theme reference: https://xyproto.github.io/splash/docs/
+//   dracula, monokai, nord, gruvbox, catppuccin-mocha, tokyo-night
+//   (Chroma ships all of these in goldmark-highlighting ≥ v0.3.4)
+
+func glamourStyleConfig(themeIdx int) ansi.StyleConfig {
+	switch themeIdx {
+
+	case 0: // ── Catppuccin Mocha ─────────────────────────────────────────
+		return ansi.StyleConfig{
+			Document: ansi.StyleBlock{
+				StylePrimitive: ansi.StylePrimitive{
+					BlockPrefix: "\n",
+					BlockSuffix: "\n",
+					Color:       strPtr("#cdd6f4"),
+				},
+				Margin: uintPtr(2),
+			},
+			BlockQuote: ansi.StyleBlock{
+				StylePrimitive: ansi.StylePrimitive{
+					Color:  strPtr("#a6adc8"),
+					Italic: boolPtr(true),
+				},
+				Indent:      uintPtr(1),
+				IndentToken: strPtr("▎ "),
+			},
+			Paragraph: ansi.StyleBlock{
+				StylePrimitive: ansi.StylePrimitive{
+					Color: strPtr("#cdd6f4"),
+				},
+			},
+			List: ansi.StyleList{
+				LevelIndent: 2,
+				StyleBlock: ansi.StyleBlock{
+					StylePrimitive: ansi.StylePrimitive{
+						Color: strPtr("#cdd6f4"),
+					},
+				},
+			},
+			Heading: ansi.StyleBlock{
+				StylePrimitive: ansi.StylePrimitive{
+					BlockSuffix: "\n",
+					Color:       strPtr("#cba6f7"),
+					Bold:        boolPtr(true),
+				},
+			},
+			H1: ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "# "}},
+			H2: ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "## "}},
+			H3: ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "### "}},
+			H4: ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "#### "}},
+			H5: ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "##### "}},
+			H6: ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "###### "}},
+			Strikethrough: ansi.StylePrimitive{CrossedOut: boolPtr(true)},
+			Emph: ansi.StylePrimitive{
+				Color:  strPtr("#f9e2af"),
+				Italic: boolPtr(true),
+			},
+			Strong: ansi.StylePrimitive{
+				Bold:  boolPtr(true),
+				Color: strPtr("#89b4fa"),
+			},
+			HorizontalRule: ansi.StylePrimitive{
+				Color:  strPtr("#585b70"),
+				Format: "\n─────────────────────────────────────\n",
+			},
+			Item:        ansi.StylePrimitive{BlockPrefix: "• "},
+			Enumeration: ansi.StylePrimitive{BlockPrefix: ". ", Color: strPtr("#89dceb")},
+			Task: ansi.StyleTask{
+				Ticked:   "[✓] ",
+				Unticked: "[ ] ",
+			},
+			Link:     ansi.StylePrimitive{Color: strPtr("#89b4fa"), Underline: boolPtr(true)},
+			LinkText: ansi.StylePrimitive{Color: strPtr("#cba6f7"), Bold: boolPtr(true)},
+			Code: ansi.StyleBlock{
+				StylePrimitive: ansi.StylePrimitive{
+					Color:           strPtr("#a6e3a1"),
+					BackgroundColor: strPtr("#313244"),
+				},
+			},
+			CodeBlock: ansi.StyleCodeBlock{
+				StyleBlock: ansi.StyleBlock{
+					Margin: uintPtr(2),
+				},
+				Theme: "catppuccin-mocha",
+			},
+			Table: ansi.StyleTable{
+				StyleBlock:      ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Color: strPtr("#cdd6f4")}},
+				CenterSeparator: strPtr("┼"),
+				ColumnSeparator: strPtr("│"),
+				RowSeparator:    strPtr("─"),
+			},
+		}
+
+	case 1: // ── Tokyo Night ───────────────────────────────────────────────
+		return ansi.StyleConfig{
+			Document: ansi.StyleBlock{
+				StylePrimitive: ansi.StylePrimitive{
+					BlockPrefix: "\n",
+					BlockSuffix: "\n",
+					Color:       strPtr("#c0caf5"),
+				},
+				Margin: uintPtr(2),
+			},
+			BlockQuote: ansi.StyleBlock{
+				StylePrimitive: ansi.StylePrimitive{
+					Color:  strPtr("#565f89"),
+					Italic: boolPtr(true),
+				},
+				Indent:      uintPtr(1),
+				IndentToken: strPtr("▎ "),
+			},
+			Paragraph: ansi.StyleBlock{
+				StylePrimitive: ansi.StylePrimitive{Color: strPtr("#c0caf5")},
+			},
+			List: ansi.StyleList{
+				LevelIndent: 2,
+				StyleBlock:  ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Color: strPtr("#c0caf5")}},
+			},
+			Heading: ansi.StyleBlock{
+				StylePrimitive: ansi.StylePrimitive{
+					BlockSuffix: "\n",
+					Color:       strPtr("#7aa2f7"),
+					Bold:        boolPtr(true),
+				},
+			},
+			H1: ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "# "}},
+			H2: ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "## "}},
+			H3: ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "### "}},
+			H4: ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "#### "}},
+			H5: ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "##### "}},
+			H6: ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "###### "}},
+			Strikethrough: ansi.StylePrimitive{CrossedOut: boolPtr(true)},
+			Emph: ansi.StylePrimitive{
+				Color:  strPtr("#e0af68"),
+				Italic: boolPtr(true),
+			},
+			Strong: ansi.StylePrimitive{
+				Bold:  boolPtr(true),
+				Color: strPtr("#bb9af7"),
+			},
+			HorizontalRule: ansi.StylePrimitive{
+				Color:  strPtr("#414868"),
+				Format: "\n─────────────────────────────────────\n",
+			},
+			Item:        ansi.StylePrimitive{BlockPrefix: "• "},
+			Enumeration: ansi.StylePrimitive{BlockPrefix: ". ", Color: strPtr("#2ac3de")},
+			Task: ansi.StyleTask{
+				Ticked:   "[✓] ",
+				Unticked: "[ ] ",
+			},
+			Link:     ansi.StylePrimitive{Color: strPtr("#7aa2f7"), Underline: boolPtr(true)},
+			LinkText: ansi.StylePrimitive{Color: strPtr("#bb9af7"), Bold: boolPtr(true)},
+			Code: ansi.StyleBlock{
+				StylePrimitive: ansi.StylePrimitive{
+					Color:           strPtr("#9ece6a"),
+					BackgroundColor: strPtr("#1f2335"),
+				},
+			},
+			CodeBlock: ansi.StyleCodeBlock{
+				StyleBlock: ansi.StyleBlock{Margin: uintPtr(2)},
+				Theme:      "tokyo-night",
+			},
+			Table: ansi.StyleTable{
+				StyleBlock:      ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Color: strPtr("#c0caf5")}},
+				CenterSeparator: strPtr("┼"),
+				ColumnSeparator: strPtr("│"),
+				RowSeparator:    strPtr("─"),
+			},
+		}
+
+	case 2: // ── Rosé Pine ─────────────────────────────────────────────────
+		return ansi.StyleConfig{
+			Document: ansi.StyleBlock{
+				StylePrimitive: ansi.StylePrimitive{
+					BlockPrefix: "\n",
+					BlockSuffix: "\n",
+					Color:       strPtr("#e0def4"),
+				},
+				Margin: uintPtr(2),
+			},
+			BlockQuote: ansi.StyleBlock{
+				StylePrimitive: ansi.StylePrimitive{
+					Color:  strPtr("#908caa"),
+					Italic: boolPtr(true),
+				},
+				Indent:      uintPtr(1),
+				IndentToken: strPtr("▎ "),
+			},
+			Paragraph: ansi.StyleBlock{
+				StylePrimitive: ansi.StylePrimitive{Color: strPtr("#e0def4")},
+			},
+			List: ansi.StyleList{
+				LevelIndent: 2,
+				StyleBlock:  ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Color: strPtr("#e0def4")}},
+			},
+			Heading: ansi.StyleBlock{
+				StylePrimitive: ansi.StylePrimitive{
+					BlockSuffix: "\n",
+					Color:       strPtr("#c4a7e7"),
+					Bold:        boolPtr(true),
+				},
+			},
+			H1: ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "# "}},
+			H2: ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "## "}},
+			H3: ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "### "}},
+			H4: ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "#### "}},
+			H5: ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "##### "}},
+			H6: ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "###### "}},
+			Strikethrough: ansi.StylePrimitive{CrossedOut: boolPtr(true)},
+			Emph: ansi.StylePrimitive{
+				Color:  strPtr("#f6c177"),
+				Italic: boolPtr(true),
+			},
+			Strong: ansi.StylePrimitive{
+				Bold:  boolPtr(true),
+				Color: strPtr("#9ccfd8"),
+			},
+			HorizontalRule: ansi.StylePrimitive{
+				Color:  strPtr("#403d52"),
+				Format: "\n─────────────────────────────────────\n",
+			},
+			Item:        ansi.StylePrimitive{BlockPrefix: "• "},
+			Enumeration: ansi.StylePrimitive{BlockPrefix: ". ", Color: strPtr("#ebbcba")},
+			Task: ansi.StyleTask{
+				Ticked:   "[✓] ",
+				Unticked: "[ ] ",
+			},
+			Link:     ansi.StylePrimitive{Color: strPtr("#9ccfd8"), Underline: boolPtr(true)},
+			LinkText: ansi.StylePrimitive{Color: strPtr("#c4a7e7"), Bold: boolPtr(true)},
+			Code: ansi.StyleBlock{
+				StylePrimitive: ansi.StylePrimitive{
+					Color:           strPtr("#31748f"),
+					BackgroundColor: strPtr("#2a2837"),
+				},
+			},
+			CodeBlock: ansi.StyleCodeBlock{
+				StyleBlock: ansi.StyleBlock{Margin: uintPtr(2)},
+				Theme:      "dracula",
+			},
+			Table: ansi.StyleTable{
+				StyleBlock:      ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Color: strPtr("#e0def4")}},
+				CenterSeparator: strPtr("┼"),
+				ColumnSeparator: strPtr("│"),
+				RowSeparator:    strPtr("─"),
+			},
+		}
+
+	case 3: // ── Nord ──────────────────────────────────────────────────────
+		return ansi.StyleConfig{
+			Document: ansi.StyleBlock{
+				StylePrimitive: ansi.StylePrimitive{
+					BlockPrefix: "\n",
+					BlockSuffix: "\n",
+					Color:       strPtr("#d8dee9"),
+				},
+				Margin: uintPtr(2),
+			},
+			BlockQuote: ansi.StyleBlock{
+				StylePrimitive: ansi.StylePrimitive{
+					Color:  strPtr("#4c566a"),
+					Italic: boolPtr(true),
+				},
+				Indent:      uintPtr(1),
+				IndentToken: strPtr("▎ "),
+			},
+			Paragraph: ansi.StyleBlock{
+				StylePrimitive: ansi.StylePrimitive{Color: strPtr("#d8dee9")},
+			},
+			List: ansi.StyleList{
+				LevelIndent: 2,
+				StyleBlock:  ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Color: strPtr("#d8dee9")}},
+			},
+			Heading: ansi.StyleBlock{
+				StylePrimitive: ansi.StylePrimitive{
+					BlockSuffix: "\n",
+					Color:       strPtr("#81a1c1"),
+					Bold:        boolPtr(true),
+				},
+			},
+			H1: ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "# "}},
+			H2: ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "## "}},
+			H3: ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "### "}},
+			H4: ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "#### "}},
+			H5: ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "##### "}},
+			H6: ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "###### "}},
+			Strikethrough: ansi.StylePrimitive{CrossedOut: boolPtr(true)},
+			Emph: ansi.StylePrimitive{
+				Color:  strPtr("#ebcb8b"),
+				Italic: boolPtr(true),
+			},
+			Strong: ansi.StylePrimitive{
+				Bold:  boolPtr(true),
+				Color: strPtr("#88c0d0"),
+			},
+			HorizontalRule: ansi.StylePrimitive{
+				Color:  strPtr("#3b4252"),
+				Format: "\n─────────────────────────────────────\n",
+			},
+			Item:        ansi.StylePrimitive{BlockPrefix: "• "},
+			Enumeration: ansi.StylePrimitive{BlockPrefix: ". ", Color: strPtr("#8fbcbb")},
+			Task: ansi.StyleTask{
+				Ticked:   "[✓] ",
+				Unticked: "[ ] ",
+			},
+			Link:     ansi.StylePrimitive{Color: strPtr("#81a1c1"), Underline: boolPtr(true)},
+			LinkText: ansi.StylePrimitive{Color: strPtr("#88c0d0"), Bold: boolPtr(true)},
+			Code: ansi.StyleBlock{
+				StylePrimitive: ansi.StylePrimitive{
+					Color:           strPtr("#a3be8c"),
+					BackgroundColor: strPtr("#2e3440"),
+				},
+			},
+			CodeBlock: ansi.StyleCodeBlock{
+				StyleBlock: ansi.StyleBlock{Margin: uintPtr(2)},
+				Theme:      "nord",
+			},
+			Table: ansi.StyleTable{
+				StyleBlock:      ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Color: strPtr("#d8dee9")}},
+				CenterSeparator: strPtr("┼"),
+				ColumnSeparator: strPtr("│"),
+				RowSeparator:    strPtr("─"),
+			},
+		}
+
+	default: // case 4: ── Gruvbox ───────────────────────────────────────
+		return ansi.StyleConfig{
+			Document: ansi.StyleBlock{
+				StylePrimitive: ansi.StylePrimitive{
+					BlockPrefix: "\n",
+					BlockSuffix: "\n",
+					Color:       strPtr("#ebdbb2"),
+				},
+				Margin: uintPtr(2),
+			},
+			BlockQuote: ansi.StyleBlock{
+				StylePrimitive: ansi.StylePrimitive{
+					Color:  strPtr("#a89984"),
+					Italic: boolPtr(true),
+				},
+				Indent:      uintPtr(1),
+				IndentToken: strPtr("▎ "),
+			},
+			Paragraph: ansi.StyleBlock{
+				StylePrimitive: ansi.StylePrimitive{Color: strPtr("#ebdbb2")},
+			},
+			List: ansi.StyleList{
+				LevelIndent: 2,
+				StyleBlock:  ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Color: strPtr("#ebdbb2")}},
+			},
+			Heading: ansi.StyleBlock{
+				StylePrimitive: ansi.StylePrimitive{
+					BlockSuffix: "\n",
+					Color:       strPtr("#fabd2f"),
+					Bold:        boolPtr(true),
+				},
+			},
+			H1: ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "# "}},
+			H2: ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "## "}},
+			H3: ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "### "}},
+			H4: ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "#### "}},
+			H5: ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "##### "}},
+			H6: ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "###### "}},
+			Strikethrough: ansi.StylePrimitive{CrossedOut: boolPtr(true)},
+			Emph: ansi.StylePrimitive{
+				Color:  strPtr("#fe8019"),
+				Italic: boolPtr(true),
+			},
+			Strong: ansi.StylePrimitive{
+				Bold:  boolPtr(true),
+				Color: strPtr("#8ec07c"),
+			},
+			HorizontalRule: ansi.StylePrimitive{
+				Color:  strPtr("#504945"),
+				Format: "\n─────────────────────────────────────\n",
+			},
+			Item:        ansi.StylePrimitive{BlockPrefix: "• "},
+			Enumeration: ansi.StylePrimitive{BlockPrefix: ". ", Color: strPtr("#83a598")},
+			Task: ansi.StyleTask{
+				Ticked:   "[✓] ",
+				Unticked: "[ ] ",
+			},
+			Link:     ansi.StylePrimitive{Color: strPtr("#83a598"), Underline: boolPtr(true)},
+			LinkText: ansi.StylePrimitive{Color: strPtr("#fabd2f"), Bold: boolPtr(true)},
+			Code: ansi.StyleBlock{
+				StylePrimitive: ansi.StylePrimitive{
+					Color:           strPtr("#b8bb26"),
+					BackgroundColor: strPtr("#1d2021"),
+				},
+			},
+			CodeBlock: ansi.StyleCodeBlock{
+				StyleBlock: ansi.StyleBlock{Margin: uintPtr(2)},
+				Theme:      "gruvbox",
+			},
+			Table: ansi.StyleTable{
+				StyleBlock:      ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Color: strPtr("#ebdbb2")}},
+				CenterSeparator: strPtr("┼"),
+				ColumnSeparator: strPtr("│"),
+				RowSeparator:    strPtr("─"),
+			},
+		}
+	}
+}
+
+// ── Renderer cache ────────────────────────────────────────────────────────────
+
+type rendererKey struct {
+	themeIdx int
+	wordWrap int
+}
+
+var (
+	rendererMu    sync.Mutex
+	rendererCache = map[rendererKey]*glamour.TermRenderer{}
+)
+
+// invalidateRendererCache clears the entire renderer cache.  Call this
+// whenever the active theme changes so the next renderMarkdown call
+// constructs a fresh TermRenderer with the new glamour style.
+func invalidateRendererCache() {
+	rendererMu.Lock()
+	defer rendererMu.Unlock()
+	rendererCache = map[rendererKey]*glamour.TermRenderer{}
+}
+
+// cachedRenderer returns a *glamour.TermRenderer for the given theme index and
+// word-wrap width, constructing and caching one on first use.  Thread-safe.
+func cachedRenderer(themeIdx, wordWrap int) *glamour.TermRenderer {
+	key := rendererKey{themeIdx, wordWrap}
+
+	rendererMu.Lock()
+	defer rendererMu.Unlock()
+
+	if r, ok := rendererCache[key]; ok {
+		return r
+	}
+
+	cfg := glamourStyleConfig(themeIdx)
+	r, err := glamour.NewTermRenderer(
+		glamour.WithStyles(cfg),
+		glamour.WithWordWrap(wordWrap),
+	)
+	if err != nil {
+		// Defensive fallback: standard dark style.
+		r, _ = glamour.NewTermRenderer(
+			glamour.WithStandardStyle("dark"),
+			glamour.WithWordWrap(wordWrap),
+		)
+	}
+	if r != nil {
+		rendererCache[key] = r
+	}
+	return r
+}
+
+// ── Top-level renderer ────────────────────────────────────────────────────────
+
+// renderMarkdown converts an LLM reply into styled terminal output using
+// glamour for full CommonMark + GFM rendering.
+//
+// Parameters:
+//   - s          styledSet for the active theme (s.themeIdx selects glamour style)
+//   - text       raw markdown text from the model
+//   - contentW   available column width for the message body
+//   - baseStyle  fallback lipgloss style (used only when glamour is unavailable)
+func renderMarkdown(s styledSet, text string, contentW int, baseStyle lipgloss.Style) string {
+	if text == "" {
+		return ""
+	}
+
+	// Narrow terminal: skip glamour and just wrap plainly.
+	if contentW < 12 {
+		return baseStyle.PaddingLeft(2).Width(contentW).Render(strings.TrimSpace(text)) + "\n"
+	}
+
+	r := cachedRenderer(s.themeIdx, contentW)
+	if r == nil {
+		return baseStyle.PaddingLeft(2).Width(contentW).Render(strings.TrimSpace(text)) + "\n"
+	}
+
+	rendered, err := r.Render(text)
+	if err != nil {
+		return baseStyle.PaddingLeft(2).Width(contentW).Render(strings.TrimSpace(text)) + "\n"
+	}
+
+	// glamour wraps the output in a leading \n and trailing \n\n.
+	// Trim trailing blank lines; keep at most one trailing newline so spacing
+	// stays consistent with the "user" and "error" message blocks.
+	rendered = strings.TrimRight(rendered, "\n")
+	if rendered == "" {
+		return ""
+	}
+	return rendered + "\n"
+}
+
+// ── parseSegments — retained for smartCopy in chat.go ────────────────────────
+//
+// smartCopy uses parseSegments to locate the first fenced code block so it can
+// copy just the code body to the clipboard.  This function is no longer used
+// for rendering.
 
 // textSegment is one parsed piece of a message — prose or a fenced code block.
 type textSegment struct {
@@ -40,8 +560,6 @@ type textSegment struct {
 }
 
 // parseSegments splits text into alternating prose and code-fence segments.
-// The line-by-line state machine deliberately avoids regex to keep the
-// streaming-partial-text behaviour predictable and allocation-free.
 func parseSegments(text string) []textSegment {
 	var segs []textSegment
 	var buf strings.Builder
@@ -52,7 +570,6 @@ func parseSegments(text string) []textSegment {
 		trimmed := strings.TrimSpace(line)
 
 		if !inCode && strings.HasPrefix(trimmed, "```") {
-			// Opening fence: ```[lang]
 			if buf.Len() > 0 {
 				segs = append(segs, textSegment{body: strings.Trim(buf.String(), "\n")})
 				buf.Reset()
@@ -63,7 +580,6 @@ func parseSegments(text string) []textSegment {
 		}
 
 		if inCode && trimmed == "```" {
-			// Closing fence
 			segs = append(segs, textSegment{
 				code: true,
 				lang: lang,
@@ -81,7 +597,6 @@ func parseSegments(text string) []textSegment {
 		buf.WriteString(line)
 	}
 
-	// Flush trailing buffer (may be an unclosed fence during streaming).
 	if buf.Len() > 0 {
 		segs = append(segs, textSegment{
 			code: inCode,
@@ -90,179 +605,4 @@ func parseSegments(text string) []textSegment {
 		})
 	}
 	return segs
-}
-
-// ── Inline code ───────────────────────────────────────────────────────────────
-
-// inlineCodeRE matches `code` spans inside prose (non-greedy, single line).
-var inlineCodeRE = regexp.MustCompile("`([^`\n]+)`")
-
-// applyInlineCode replaces `code` spans in text with ANSI-styled equivalents.
-// The output contains ANSI escape codes; lipgloss measures their visual width
-// correctly when performing subsequent word-wrap operations.
-func applyInlineCode(text string, style lipgloss.Style) string {
-	return inlineCodeRE.ReplaceAllStringFunc(text, func(match string) string {
-		inner := match[1 : len(match)-1]
-		return style.Render(inner)
-	})
-}
-
-// ── Code block box-drawing ────────────────────────────────────────────────────
-//
-// Box geometry:
-//
-//   contentW    — available column width for the message body
-//   boxW        = contentW − 4   (2-col left indent + 2-col right clearance)
-//   innerW      = boxW   − 2     (inside the │ border chars)
-//   padW        = innerW − 2     (inside the 1-col inner padding on each side)
-//
-// Each rendered row is prefixed with a 2-space indent so it aligns with prose.
-//
-// Visual width per row:
-//   2 (indent) + 1 (│) + 1 (pad) + padW (content) + 1 (pad) + 1 (│) = padW+6
-//   = innerW+4 = boxW+2 = contentW−2  ✓
-
-// codeTopBorder returns the top border line including an optional language tag.
-//
-//	With tag:    ╭─ go ──────────────────────────────────────╮
-//	Without tag: ╭──────────────────────────────────────────╮
-func codeTopBorder(lang string, innerW int) string {
-	if lang == "" {
-		return "╭" + strings.Repeat("─", innerW) + "╮"
-	}
-	label := " " + lang + " "
-	labelW := lipgloss.Width(label)
-	fill := innerW - 1 - labelW // 1 for the leading "─" after "╭"
-	if fill < 1 {
-		fill = 1
-	}
-	return "╭─" + label + strings.Repeat("─", fill) + "╮"
-}
-
-// renderCodeBlock renders one fenced code block as a bordered, padded box.
-// borderStyle colours the box-drawing characters; lineStyle colours the body.
-func renderCodeBlock(
-	lang, body string,
-	boxW int,
-	borderColor, bgColor, fgColor lipgloss.TerminalColor,
-) string {
-	innerW := boxW - 2
-	padW := innerW - 2
-	if padW < 4 {
-		padW = 4
-	}
-
-	borderStyle := lipgloss.NewStyle().Foreground(borderColor)
-
-	// Code content: fixed-width lines on the block background.
-	lineStyle := lipgloss.NewStyle().
-		Background(bgColor).
-		Foreground(fgColor).
-		Width(padW).
-		MaxWidth(padW)
-
-	// Empty padding line (dark bg, no text).
-	emptyLine := lineStyle.Render("")
-
-	var sb strings.Builder
-	indent := "  "
-
-	// ── Top border ────────────────────────────────────────────────────────
-	sb.WriteString(indent + borderStyle.Render(codeTopBorder(lang, innerW)) + "\n")
-
-	// ── Top inner padding ─────────────────────────────────────────────────
-	sb.WriteString(
-		indent +
-			borderStyle.Render("│") + " " +
-			emptyLine + " " +
-			borderStyle.Render("│") + "\n",
-	)
-
-	// ── Code lines ────────────────────────────────────────────────────────
-	lines := strings.Split(strings.ReplaceAll(body, "\t", "    "), "\n")
-	for _, line := range lines {
-		rendered := lineStyle.Render(line)
-		sb.WriteString(
-			indent +
-				borderStyle.Render("│") + " " +
-				rendered + " " +
-				borderStyle.Render("│") + "\n",
-		)
-	}
-
-	// ── Bottom inner padding ──────────────────────────────────────────────
-	sb.WriteString(
-		indent +
-			borderStyle.Render("│") + " " +
-			emptyLine + " " +
-			borderStyle.Render("│") + "\n",
-	)
-
-	// ── Bottom border ─────────────────────────────────────────────────────
-	sb.WriteString(indent + borderStyle.Render("╰"+strings.Repeat("─", innerW)+"╯") + "\n")
-
-	return sb.String()
-}
-
-// ── Top-level renderer ────────────────────────────────────────────────────────
-
-// renderMarkdown converts an LLM reply into styled terminal output.
-//
-//	Prose  →  word-wrapped, left-padded, inline `code` highlighted
-//	Code   →  bordered box with language tag in top-left corner
-//
-// Falls back to unstyled text on very narrow terminals (contentW < 12).
-func renderMarkdown(s styledSet, text string, contentW int, baseStyle lipgloss.Style) string {
-	segs := parseSegments(text)
-	if len(segs) == 0 {
-		return ""
-	}
-
-	// Narrow terminal: skip all box styling.
-	if contentW < 12 {
-		var sb strings.Builder
-		for _, seg := range segs {
-			if b := strings.TrimSpace(seg.body); b != "" {
-				sb.WriteString(baseStyle.Render(b) + "\n")
-			}
-		}
-		return sb.String()
-	}
-
-	boxW := contentW - 4
-	if boxW < 8 {
-		boxW = 8
-	}
-
-	var sb strings.Builder
-
-	for i, seg := range segs {
-		// Blank line between segments for visual breathing room.
-		if i > 0 {
-			sb.WriteByte('\n')
-		}
-
-		if seg.code {
-			sb.WriteString(renderCodeBlock(
-				seg.lang,
-				seg.body,
-				boxW,
-				s.codeBorder,
-				s.codeBg,
-				s.codeFg,
-			))
-			continue
-		}
-
-		// Prose: apply inline code highlighting, then word-wrap.
-		body := strings.TrimSpace(seg.body)
-		if body == "" {
-			continue
-		}
-		body = applyInlineCode(body, s.codeInline)
-		sb.WriteString(baseStyle.PaddingLeft(2).Width(contentW).Render(body))
-		sb.WriteByte('\n')
-	}
-
-	return sb.String()
 }

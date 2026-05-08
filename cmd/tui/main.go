@@ -30,8 +30,8 @@ import (
 	"google.golang.org/adk/tool/loadartifactstool"
 	"google.golang.org/adk/tool/loadmemorytool"
 	"google.golang.org/adk/tool/preloadmemorytool"
-	"google.golang.org/adk/tool/skilltoolset"
 	"google.golang.org/adk/tool/skilltoolset/skill"
+	localskilltoolset "go-adk-q/tool/skilltoolset"
 	"google.golang.org/genai"
 
 	"go-adk-q/agents"
@@ -99,6 +99,40 @@ var runCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(chatCmd)
 	rootCmd.AddCommand(runCmd)
+}
+
+// applyProviderSelected reads PROVIDER_SELECTED and moves the matching
+// provider to the front of the candidateLLMs slice so it becomes the
+// primary model in the failover chain. All other providers remain as
+// ordered fallbacks.
+//
+// Valid values (case-insensitive):
+//
+//	github, gemini, groq, nvidia, openrouter, huggingface, echo
+//
+// Example:
+//
+//	export PROVIDER_SELECTED=openrouter
+func applyProviderSelected(llms []model.LLM) []model.LLM {
+	sel := strings.ToLower(strings.TrimSpace(os.Getenv("PROVIDER_SELECTED")))
+	if sel == "" || len(llms) <= 1 {
+		return llms
+	}
+	for i, m := range llms {
+		if strings.Contains(strings.ToLower(m.Name()), sel) {
+			if i == 0 {
+				return llms // already first
+			}
+			reordered := make([]model.LLM, 0, len(llms))
+			reordered = append(reordered, llms[i])
+			reordered = append(reordered, llms[:i]...)
+			reordered = append(reordered, llms[i+1:]...)
+			slog.Info("PROVIDER_SELECTED applied", "provider", sel, "model", m.Name())
+			return reordered
+		}
+	}
+	slog.Warn("PROVIDER_SELECTED: no configured provider matched", "value", sel)
+	return llms
 }
 
 // buildRunner constructs the failover model chain, a root agent with tools,
@@ -189,74 +223,117 @@ func buildRunner(ctx context.Context) (*runner.Runner, session.Service, memory.S
 		)
 	}
 
+	// PROVIDER_SELECTED moves the named provider to the front of the chain.
+	// Valid values: github, gemini, groq, nvidia, openrouter, huggingface, echo.
+	// Example: PROVIDER_SELECTED=openrouter
+	candidateLLMs = applyProviderSelected(candidateLLMs)
+
+	primaryName := candidateLLMs[0].Name() // primary model name for display
 	m := failover.New(candidateLLMs[0], candidateLLMs[1:]...)
 	slog.Info("model chain", "providers", m.Name())
 
 	// ── Tools, skills, memory, artifacts, and LLM Auditor ────────────────────
-	// All gated on GOOGLE_API_KEY; see function comment for rationale.
 	//
-	// Tool inventory when Gemini is configured:
+	// Skills and basic tools (weather, time, calculator) work with ANY provider
+	// that supports function calling — GitHub Models, OpenRouter, Groq, etc.
+	// skilltoolset uses plain functiontool.New internally; it has no Gemini
+	// dependency whatsoever.
+	//
+	// Only llm_auditor + memory/artifact tools remain gated on GOOGLE_API_KEY
+	// because those involve multi-step tool chains that non-Gemini providers
+	// struggle with (Groq: 400 tool_use_failed on complex chains).
+	//
+	// Tool inventory (all providers):
 	//   weather, time, calculator    – FunctionTools (tools/)
-	//   preload_memory               – auto-injects past-turn context into every request
-	//   load_memory                  – lets the model explicitly search past turns
-	//   load_artifacts               – lets the model access saved artifact files
-	//   llm_auditor (via agenttool)  – fact-checks answers via critic→reviser pipeline
+	//   list_skills, load_skill,
+	//   load_skill_resource          – via SkillToolset (if ./skills/ exists)
+	//
+	// Additional tools (GOOGLE_API_KEY only):
+	//   preload_memory, load_memory  – memory recall across turns
+	//   load_artifacts               – access saved artifact files
+	//   llm_auditor (agenttool)      – fact-check via critic→reviser pipeline
 	var agentTools []tool.Tool
 	var agentToolsets []tool.Toolset
-	geminiInstruction := "You are a helpful, concise AI assistant in a terminal chat UI. " +
-		"Answer questions directly and briefly. " +
-		"Keep responses short — the user is reading in a terminal window."
-	if os.Getenv("GOOGLE_API_KEY") != "" {
-		llmAuditor := agents.GetLLMAuditorAgent(ctx, m)
-		agentTools = []tool.Tool{
-			tools.NewWeatherTool(),
-			tools.NewTimeTool(),
-			tools.NewCalculatorTool(),
-			// Memory tools: preload_memory runs automatically on every request;
-			// load_memory is called explicitly by the model to search past turns.
-			preloadmemorytool.New(),
-			loadmemorytool.New(),
-			// Artifact tool: lets the model list and load named artifact files.
-			loadartifactstool.New(),
-			// LLM Auditor: exposed as a sub-agent tool; delegate to it when
-			// the user asks to fact-check or verify an answer.
-			agenttool.New(llmAuditor, nil),
-		}
-		geminiInstruction = "You are a helpful, concise AI assistant in a terminal chat UI. " +
-			"Answer questions directly and briefly. " +
-			"Use tools when the user asks about weather, time, or arithmetic. " +
-			"Use load_memory or preload_memory context to recall past conversations. " +
-			"Delegate to llm_auditor when the user asks to fact-check or verify an answer. " +
-			"Keep responses short — the user is reading in a terminal window."
-	} else {
-		slog.Info("tools disabled — GOOGLE_API_KEY not set; set it to enable weather/time/calculator/memory/artifact tools")
+
+	// Basic tools — always enabled for any provider with function calling.
+	agentTools = []tool.Tool{
+		tools.NewWeatherTool(),
+		tools.NewTimeTool(),
+		tools.NewCalculatorTool(),
 	}
 
-	if os.Getenv("GOOGLE_API_KEY") != "" {
-		if _, statErr := os.Stat("./skills"); statErr == nil {
-			rawSource := skill.NewFileSystemSource(os.DirFS("./skills"))
-			preloaded, _, preloadErr := skill.WithCompletePreloadSource(ctx, rawSource)
-			if preloadErr != nil {
-				slog.Warn("skills preload failed — running without skills", "error", preloadErr)
+	baseInstruction := "You are cli-q, an expert AI assistant running in a terminal.\n\n" +
+		"## Tools\n" +
+		"- get_weather / get_current_time — use for weather and time questions\n" +
+		"- calculator — use for arithmetic\n" +
+		"- list_skills — call this (no arguments) to discover available skills\n" +
+		"- load_skill — call with {\"name\": \"<skill_name>\"} to load a skill's instructions\n\n" +
+		"## Skills workflow\n" +
+		"If the user's request matches a specialized task (code review, architecture, " +
+		"debugging, documentation, etc.), ALWAYS:\n" +
+		"1. Call list_skills to see what is available\n" +
+		"2. Call load_skill with the best matching skill name\n" +
+		"3. Follow the loaded instructions exactly before replying\n\n" +
+		"## Style\n" +
+		"- Terminal output: prefer short, direct answers\n" +
+		"- Use markdown sparingly — fenced code blocks for code, bold for emphasis\n" +
+		"- Never pad responses with preamble or sign-offs"
+
+	// Skills toolset — enabled for any provider when ./skills/ dir exists.
+	if _, statErr := os.Stat("./skills"); statErr == nil {
+		rawSource := skill.NewFileSystemSource(os.DirFS("./skills"))
+		preloaded, _, preloadErr := skill.WithCompletePreloadSource(ctx, rawSource)
+		if preloadErr != nil {
+			slog.Warn("skills preload failed — running without skills", "error", preloadErr)
+		} else {
+			skillToolset, stErr := localskilltoolset.New(ctx, localskilltoolset.Config{Source: preloaded})
+			if stErr != nil {
+				slog.Warn("skills toolset init failed — running without skills", "error", stErr)
 			} else {
-				skillToolset, stErr := skilltoolset.New(ctx, skilltoolset.Config{Source: preloaded})
-				if stErr != nil {
-					slog.Warn("skills toolset init failed — running without skills", "error", stErr)
-				} else {
-					agentToolsets = append(agentToolsets, skillToolset)
-					slog.Info("skills toolset enabled", "path", "./skills")
-				}
+				agentToolsets = append(agentToolsets, skillToolset)
+				slog.Info("skills toolset enabled", "path", "./skills")
 			}
 		}
+	}
+
+	// Advanced tools — gated on GOOGLE_API_KEY because llm_auditor and memory
+	// tools require reliable multi-step tool chains only Gemini handles well.
+	if os.Getenv("GOOGLE_API_KEY") != "" {
+		llmAuditor := agents.GetLLMAuditorAgent(ctx, m)
+		agentTools = append(agentTools,
+			preloadmemorytool.New(),
+			loadmemorytool.New(),
+			loadartifactstool.New(),
+			agenttool.New(llmAuditor, nil),
+		)
+		baseInstruction = "You are cli-q, an expert AI assistant running in a terminal.\n\n" +
+			"## Tools\n" +
+			"- get_weather / get_current_time — use for weather and time questions\n" +
+			"- calculator — use for arithmetic\n" +
+			"- list_skills — call this (no arguments) to discover available skills\n" +
+			"- load_skill — call with {\"name\": \"<skill_name>\"} to load a skill's instructions\n" +
+			"- preload_memory / load_memory — recall facts from past conversations\n" +
+			"- load_artifacts — access previously saved files\n" +
+			"- llm_auditor — delegate fact-checking and verification tasks here\n\n" +
+			"## Skills workflow\n" +
+			"If the user's request matches a specialized task (code review, architecture, " +
+			"debugging, documentation, etc.), ALWAYS:\n" +
+			"1. Call list_skills to see what is available\n" +
+			"2. Call load_skill with the best matching skill name\n" +
+			"3. Follow the loaded instructions exactly before replying\n\n" +
+			"## Style\n" +
+			"- Terminal output: prefer short, direct answers\n" +
+			"- Use markdown sparingly — fenced code blocks for code, bold for emphasis\n" +
+			"- Never pad responses with preamble or sign-offs"
 	} else {
-		slog.Info("skills toolset disabled — GOOGLE_API_KEY not set; set it to enable skills")
+		slog.Info("advanced tools disabled — GOOGLE_API_KEY not set (memory, artifacts, llm_auditor require Gemini)")
 	}
 
 	rootAgent, err := llmagent.New(llmagent.Config{
 		Name:        "cli-q",
 		Model:       m,
 		Description: "Helpful AI assistant. Tools: weather, time, calculator, memory recall, artifact access, LLM fact-checker (Gemini only).",
-		Instruction: geminiInstruction,
+		Instruction: baseInstruction,
 		Tools:       agentTools,
 		Toolsets:    agentToolsets,
 	})
@@ -282,7 +359,7 @@ func buildRunner(ctx context.Context) (*runner.Runner, session.Service, memory.S
 		return nil, nil, nil, "", fmt.Errorf("create runner: %w", err)
 	}
 
-	return r, sessionSvc, memorySvc, m.Name(), nil
+	return r, sessionSvc, memorySvc, primaryName, nil
 }
 
 // runOnce sends one message to the agent, prints the final response, and exits.

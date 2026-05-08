@@ -45,7 +45,8 @@ const (
 	// DefaultModel is the recommended starting point: Meta's LLaMA 4 Scout 17B
 	// offers strong instruction following and tool use at very low latency
 	// on Groq's LPU hardware.
-	DefaultModel = "meta-llama/llama-4-scout-17b-16e-instruct"
+	// TESTED MODELS: "llama-3.3-70b-versatile", "llama-3.1-8b-instant", "gemma2-9b-it", "mixtral-8x7b-32768", "qwen/qwen3-32b", "qwen/qwen3-16b", "qwen/qwen3-8b", "llama-3.1-8b-instant", "meta-llama/llama-4-scout-17b-16e-instruct"
+	DefaultModel = "llama-3.1-8b-instant"
 
 	baseURL  = "https://api.groq.com/openai/v1"
 	provider = "groq"

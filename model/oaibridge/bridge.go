@@ -196,8 +196,8 @@ type Config struct {
 
 // llmBridge implements model.LLM. It is safe for concurrent use once created.
 type llmBridge struct {
-	name    string      // the ModelName as provided by the caller
-	aiModel ai.Model    // Genkit model action; created once in NewModel
+	name    string       // "provider/modelName" — used by Name() and failover display
+	aiModel ai.Model     // Genkit model action; created once in NewModel
 	next    ai.ModelNext // pre-built hook chain (may wrap aiModel with middleware)
 }
 
@@ -253,7 +253,7 @@ func NewModel(ctx context.Context, cfg Config) (model.LLM, error) {
 	})
 
 	return &llmBridge{
-		name:    cfg.ModelName,
+		name:    cfg.Provider + "/" + cfg.ModelName,
 		aiModel: aiModel,
 		next:    buildModelNext(aiModel, cfg.Hooks),
 	}, nil
