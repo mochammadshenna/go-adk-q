@@ -486,6 +486,9 @@ func genaiConfigToMap(c *genai.GenerateContentConfig) map[string]any {
 //
 // TurnComplete is always true: the Generate call above is non-streaming and
 // returns only when the model has finished producing its response.
+// UsageMetadata is populated from resp.Usage when available so the TUI can
+// display token counts for providers backed by oaibridge (GitHub Models,
+// Groq, NVIDIA, OpenRouter, HuggingFace).
 func fromAIResponse(resp *ai.ModelResponse) *model.LLMResponse {
 	if resp == nil || resp.Message == nil {
 		return &model.LLMResponse{TurnComplete: true}
@@ -499,10 +502,22 @@ func fromAIResponse(resp *ai.ModelResponse) *model.LLMResponse {
 		}
 	}
 
-	return &model.LLMResponse{
+	llmResp := &model.LLMResponse{
 		Content:      content,
 		TurnComplete: true,
 	}
+
+	// Map Genkit GenerationUsage → ADK UsageMetadata so the TUI token counter
+	// works for all oaibridge-backed providers.
+	if resp.Usage != nil {
+		llmResp.UsageMetadata = &genai.GenerateContentResponseUsageMetadata{
+			PromptTokenCount:     int32(resp.Usage.InputTokens),
+			CandidatesTokenCount: int32(resp.Usage.OutputTokens),
+			TotalTokenCount:      int32(resp.Usage.InputTokens + resp.Usage.OutputTokens),
+		}
+	}
+
+	return llmResp
 }
 
 // aiPartToGenai converts an *ai.Part back to a *genai.Part.

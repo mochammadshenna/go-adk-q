@@ -50,9 +50,28 @@ import (
 	"context"
 	"os"
 
+	"go-adk-q/model/catalog"
 	"go-adk-q/model/oaibridge"
 	"google.golang.org/adk/model"
 )
+
+// KnownModels is the curated catalog of models available on NVIDIA NIM
+// (https://build.nvidia.com).
+//
+// Add new entries here to make them available in the /model TUI picker.
+var KnownModels = catalog.ProviderCatalog{
+	Provider: "nvidia",
+	Label:    "NVIDIA NIM",
+	Models: []catalog.ModelEntry{
+		{ID: "minimaxai/minimax-m1", Label: "MiniMax M1", Default: true},
+		{ID: "nvidia/llama-3.1-nemotron-70b-instruct", Label: "Nemotron 70B", Tags: []string{"reasoning"}},
+		{ID: "meta/llama-3.1-405b-instruct", Label: "Llama 3.1 405B", Tags: []string{"large"}},
+		{ID: "meta/llama-3.1-70b-instruct", Label: "Llama 3.1 70B"},
+		{ID: "mistralai/mistral-large-2-instruct", Label: "Mistral Large 2"},
+		{ID: "microsoft/phi-3-medium-128k-instruct", Label: "Phi-3 Medium 128K"},
+		{ID: "google/gemma-2-27b-it", Label: "Gemma 2 27B"},
+	},
+}
 
 const (
 	// DefaultModel is MiniMax's M1 model, available on NVIDIA NIM.

@@ -18,6 +18,7 @@ type slashCmd struct {
 // allSlashCmds is the canonical ordered list of slash commands.
 var allSlashCmds = []slashCmd{
 	{"/settings", "Open settings (theme, char limit)"},
+	{"/model", "Switch model or provider"},
 	{"/theme", "Cycle colour theme"},
 	{"/help", "Toggle help overlay"},
 	{"/clear", "Clear conversation history"},

@@ -35,6 +35,7 @@ import (
 	"google.golang.org/genai"
 
 	"go-adk-q/agents"
+	"go-adk-q/model/catalog"
 	"go-adk-q/model/echo"
 	"go-adk-q/model/failover"
 	"go-adk-q/model/githubmodels"
@@ -46,6 +47,37 @@ import (
 )
 
 const appName = "go-adk-q-tui"
+
+// agentConfig holds the tool/instruction configuration captured by buildRunner
+// so that rebuildRunnerWithModel can construct a new agent for the same setup
+// with a different model (used by the /model picker).
+var agentConfig struct {
+	tools       []tool.Tool
+	toolsets    []tool.Toolset
+	instruction string
+}
+
+func init() {
+	// Register all provider catalogs globally so the /model picker can list
+	// them without requiring a network call.  Registration order matches the
+	// failover priority so the picker shows providers in the same order.
+	catalog.Register(githubmodels.KnownModels)
+	catalog.Register(catalog.ProviderCatalog{
+		Provider: "gemini",
+		Label:    "Google Gemini",
+		Models: []catalog.ModelEntry{
+			{ID: "gemini-2.0-flash", Label: "Gemini 2.0 Flash", Tags: []string{"fast"}, Default: true},
+			{ID: "gemini-2.5-flash", Label: "Gemini 2.5 Flash", Tags: []string{"fast"}},
+			{ID: "gemini-2.5-pro", Label: "Gemini 2.5 Pro"},
+			{ID: "gemini-1.5-pro", Label: "Gemini 1.5 Pro", Tags: []string{"long-ctx"}},
+			{ID: "gemini-1.5-flash", Label: "Gemini 1.5 Flash", Tags: []string{"fast"}},
+		},
+	})
+	catalog.Register(groq.KnownModels)
+	catalog.Register(nvidia.KnownModels)
+	catalog.Register(openrouter.KnownModels)
+	catalog.Register(huggingface.KnownModels)
+}
 
 func main() {
 	if err := rootCmd.Execute(); err != nil {
@@ -228,9 +260,9 @@ func buildRunner(ctx context.Context) (*runner.Runner, session.Service, memory.S
 	// Example: PROVIDER_SELECTED=openrouter
 	candidateLLMs = applyProviderSelected(candidateLLMs)
 
-	primaryName := candidateLLMs[0].Name() // primary model name for display
 	m := failover.New(candidateLLMs[0], candidateLLMs[1:]...)
-	slog.Info("model chain", "providers", m.Name())
+	chainName := m.Name() // full failover chain name, e.g. "failover(github-models/gpt-4o → groq/llama...)"
+	slog.Info("model chain", "providers", chainName)
 
 	// ── Tools, skills, memory, artifacts, and LLM Auditor ────────────────────
 	//
@@ -329,6 +361,11 @@ func buildRunner(ctx context.Context) (*runner.Runner, session.Service, memory.S
 		slog.Info("advanced tools disabled — GOOGLE_API_KEY not set (memory, artifacts, llm_auditor require Gemini)")
 	}
 
+	// Capture tool config so rebuildRunnerWithModel can reuse it.
+	agentConfig.tools = agentTools
+	agentConfig.toolsets = agentToolsets
+	agentConfig.instruction = baseInstruction
+
 	rootAgent, err := llmagent.New(llmagent.Config{
 		Name:        "cli-q",
 		Model:       m,
@@ -347,19 +384,103 @@ func buildRunner(ctx context.Context) (*runner.Runner, session.Service, memory.S
 	memorySvc := memory.InMemoryService()
 
 	sessionSvc := session.InMemoryService()
-	r, err := runner.New(runner.Config{
-		AppName:           appName,
-		Agent:             rootAgent,
-		SessionService:    sessionSvc,
-		ArtifactService:   artifact.InMemoryService(),
-		MemoryService:     memorySvc,
-		AutoCreateSession: true, // creates the session on first Run() call
-	})
+	r, err := buildRunnerFromAgent(rootAgent, sessionSvc, memorySvc)
 	if err != nil {
 		return nil, nil, nil, "", fmt.Errorf("create runner: %w", err)
 	}
 
-	return r, sessionSvc, memorySvc, primaryName, nil
+	return r, sessionSvc, memorySvc, chainName, nil
+}
+
+// buildRunnerFromAgent creates a new runner from an already-built agent,
+// reusing existing session and memory services.  Used by buildRunner and by
+// switchModelCmd when the user switches model via the /model picker.
+func buildRunnerFromAgent(ag agent.Agent, sessionSvc session.Service, memorySvc memory.Service) (*runner.Runner, error) {
+	return runner.New(runner.Config{
+		AppName:           appName,
+		Agent:             ag,
+		SessionService:    sessionSvc,
+		ArtifactService:   artifact.InMemoryService(),
+		MemoryService:     memorySvc,
+		AutoCreateSession: true,
+	})
+}
+
+// rebuildRunnerWithModel creates a new agent+runner for llm, reusing the
+// session/memory services from the running TUI.  agentConfig must have been
+// populated by buildRunner before this is called.
+func rebuildRunnerWithModel(ctx context.Context, llm model.LLM, sessionSvc session.Service, memorySvc memory.Service) (*runner.Runner, error) {
+	ag, err := llmagent.New(llmagent.Config{
+		Name:        "cli-q",
+		Model:       llm,
+		Description: "Helpful AI assistant. Tools: weather, time, calculator, memory recall, artifact access, LLM fact-checker (Gemini only).",
+		Instruction: agentConfig.instruction,
+		Tools:       agentConfig.tools,
+		Toolsets:    agentConfig.toolsets,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create agent: %w", err)
+	}
+	return buildRunnerFromAgent(ag, sessionSvc, memorySvc)
+}
+
+// newModelForEntry creates a model.LLM for the given provider catalog entry.
+// Called from the TUI /model picker when the user selects a new model.
+// Reads credentials from the same environment variables as buildRunner.
+//
+// Returns an error if the required API key is not set or model creation fails.
+func newModelForEntry(ctx context.Context, providerID, modelID string) (model.LLM, error) {
+	switch providerID {
+	case "github-models":
+		cfg := githubmodels.ConfigFromEnv()
+		if cfg.PAT == "" {
+			return nil, fmt.Errorf("GITHUB_PAT not set")
+		}
+		cfg.ModelName = modelID
+		return githubmodels.NewModel(ctx, cfg)
+
+	case "gemini":
+		key := os.Getenv("GOOGLE_API_KEY")
+		if key == "" {
+			return nil, fmt.Errorf("GOOGLE_API_KEY not set")
+		}
+		return gemini.NewModel(ctx, modelID, &genai.ClientConfig{APIKey: key})
+
+	case "groq":
+		cfg := groq.ConfigFromEnv()
+		if cfg.APIKey == "" {
+			return nil, fmt.Errorf("GROQ_API_KEY not set")
+		}
+		cfg.ModelName = modelID
+		return groq.NewModel(ctx, cfg)
+
+	case "nvidia":
+		cfg := nvidia.ConfigFromEnv()
+		if cfg.APIKey == "" {
+			return nil, fmt.Errorf("NVIDIA_API_KEY not set")
+		}
+		cfg.ModelName = modelID
+		return nvidia.NewModel(ctx, cfg)
+
+	case "openrouter":
+		cfg := openrouter.ConfigFromEnv()
+		if cfg.APIKey == "" {
+			return nil, fmt.Errorf("OPENROUTER_API_KEY not set")
+		}
+		cfg.ModelName = modelID
+		return openrouter.NewModel(ctx, cfg)
+
+	case "huggingface":
+		cfg := huggingface.ConfigFromEnv()
+		if cfg.Token == "" {
+			return nil, fmt.Errorf("HF_TOKEN not set")
+		}
+		cfg.ModelName = modelID
+		return huggingface.NewModel(ctx, cfg)
+
+	default:
+		return nil, fmt.Errorf("unknown provider %q", providerID)
+	}
 }
 
 // runOnce sends one message to the agent, prints the final response, and exits.

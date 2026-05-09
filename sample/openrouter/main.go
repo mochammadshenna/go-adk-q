@@ -38,6 +38,8 @@ func main() {
 	}
 
 	///	DefaultModel
+	// See https://openrouter.ai/models for the full list and pricing.
+	// Note: model names must be prefixed with "openrouter/" — the provider name
 	// openrouterModel := "openrouter/meta-llama/llama-3.3-70b-instruct" // best open-weight option
 	// openrouterModel := "openrouter/openai/gpt-4o" // GPT-4o
 	//	openrouterModel := "openrouter/openai/gpt-4o-mini"                                 // GPT-4o mini, low cost
@@ -45,8 +47,6 @@ func main() {
 	//	openrouterModel := "openrouter/google/gemini-2.0-flash-001"                        // Gemini 2.0 Flash
 	//	openrouterModel := "openrouter/mistralai/mistral-large-2411"                       // Mistral Large
 	// openrouterModel := "openrouter/deepseek/deepseek-r1" // DeepSeek R1 (reasoning)
-	// See https://openrouter.ai/models for the full list and pricing.
-	// Note: model names must be prefixed with "openrouter/" — the provider name
 	// registered by compat_oai (e.g. "openrouter/meta-llama/llama-3.3-70b-instruct").
 	// openrouterModel := "openrouter/tencent/hy3-preview:free"
 	// openrouterModel := "openrouter/nvidia/nemotron-3-super-120b-a12b:free"

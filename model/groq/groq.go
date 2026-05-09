@@ -36,10 +36,31 @@ import (
 	"context"
 	"os"
 
+	"go-adk-q/model/catalog"
 	"go-adk-q/model/oaibridge"
 
 	"google.golang.org/adk/model"
 )
+
+// KnownModels is the curated catalog of models available on Groq's LPU
+// inference API (https://console.groq.com/docs/models).
+//
+// Add new entries here to make them available in the /model TUI picker.
+var KnownModels = catalog.ProviderCatalog{
+	Provider: "groq",
+	Label:    "Groq",
+	Models: []catalog.ModelEntry{
+		{ID: "llama-3.1-8b-instant", Label: "Llama 3.1 8B Instant", Tags: []string{"fast"}, Default: true},
+		{ID: "llama-3.3-70b-versatile", Label: "Llama 3.3 70B Versatile"},
+		{ID: "meta-llama/llama-4-scout-17b-16e-instruct", Label: "Llama 4 Scout 17B"},
+		{ID: "llama-3.1-70b-versatile", Label: "Llama 3.1 70B Versatile"},
+		{ID: "mixtral-8x7b-32768", Label: "Mixtral 8x7B", Tags: []string{"long-ctx"}},
+		{ID: "gemma2-9b-it", Label: "Gemma 2 9B"},
+		{ID: "qwen/qwen3-32b", Label: "Qwen3 32B"},
+		{ID: "qwen/qwen3-16b", Label: "Qwen3 16B"},
+		{ID: "qwen/qwen3-8b", Label: "Qwen3 8B", Tags: []string{"fast"}},
+	},
+}
 
 const (
 	// DefaultModel is the recommended starting point: Meta's LLaMA 4 Scout 17B

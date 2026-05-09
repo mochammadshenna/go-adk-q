@@ -8,8 +8,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"time"
+	"unsafe"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
@@ -24,6 +26,7 @@ import (
 	"google.golang.org/adk/session"
 	"google.golang.org/genai"
 )
+
 
 // ── Theme system ───────────────────────────────────────────────────────────────
 //
@@ -41,22 +44,25 @@ type palette struct {
 	// chrome    = header bar background
 	// onChrome  = text/icons drawn on top of the chrome background
 	// text      = primary body text on the raw terminal background
+	// bg        = viewport/body background (empty = use terminal default)
 	chrome   lipgloss.TerminalColor
 	onChrome lipgloss.TerminalColor
 	text     lipgloss.TerminalColor
+	bg       lipgloss.TerminalColor // explicit fill; empty for transparent dark themes
 
 	// ── Semantic roles ────────────────────────────────────────────────────
 	user    lipgloss.TerminalColor // user message label
 	agent   lipgloss.TerminalColor // agent reply label
+	accent  lipgloss.TerminalColor // input border, provider name highlight
 	errC    lipgloss.TerminalColor // errors (avoids the "error" keyword)
 	system  lipgloss.TerminalColor // muted: timestamps, help text, system msgs
 	loading lipgloss.TerminalColor // spinner + "Thinking…"
 
+	// ── Token counter colors ──────────────────────────────────────────────
+	tokenIn  lipgloss.TerminalColor // input token count
+	tokenOut lipgloss.TerminalColor // output token count
+
 	// ── Code block ────────────────────────────────────────────────────────
-	// codeBg     = entire block background
-	// codeFg     = code text foreground
-	// codeBorder = box-drawing characters + language tag
-	// codeInline = background for inline `code` spans inside prose
 	codeBg     lipgloss.TerminalColor
 	codeFg     lipgloss.TerminalColor
 	codeBorder lipgloss.TerminalColor
@@ -64,100 +70,173 @@ type palette struct {
 }
 
 // builtinThemes is the ordered list of colour themes.  Index 0 (Catppuccin)
-// is the default; pressing 't' advances the index cyclically.
+// is the default; /theme advances the index cyclically.
 //
-// All five palettes are based on widely-used developer colour schemes so they
-// look familiar and are carefully balanced for contrast.
+// All palettes use descriptive role names; dark themes leave bg empty
+// (transparent = terminal default) while light themes set bg explicitly.
 var builtinThemes = []palette{
 	// ── 1. Catppuccin Mocha ───────────────────────────────────────────────
-	// Warm purple-tinted dark.  The most-starred dark theme in the
-	// developer community (2024-2025); renders beautifully in 24-bit colour.
 	{
 		name:       "Catppuccin",
-		chrome:     lipgloss.Color("#1e1e2e"), // base
-		onChrome:   lipgloss.Color("#cdd6f4"), // text
+		chrome:     lipgloss.Color("#1e1e2e"),
+		onChrome:   lipgloss.Color("#cdd6f4"),
 		text:       lipgloss.Color("#cdd6f4"),
+		bg:         lipgloss.Color(""),        // transparent — use terminal bg
 		user:       lipgloss.Color("#89b4fa"), // blue
 		agent:      lipgloss.Color("#a6e3a1"), // green
-		errC:       lipgloss.Color("#f38ba8"), // red
-		system:     lipgloss.Color("#6c7086"), // overlay0 (muted)
-		loading:    lipgloss.Color("#cba6f7"), // mauve
-		codeBg:     lipgloss.Color("#181825"), // mantle (slightly darker)
+		accent:     lipgloss.Color("#89b4fa"), // blue — input border + provider
+		errC:       lipgloss.Color("#f38ba8"),
+		system:     lipgloss.Color("#6c7086"),
+		loading:    lipgloss.Color("#cba6f7"),
+		tokenIn:    lipgloss.Color("#89dceb"), // sky
+		tokenOut:   lipgloss.Color("#a6e3a1"), // green
+		codeBg:     lipgloss.Color("#181825"),
 		codeFg:     lipgloss.Color("#cdd6f4"),
-		codeBorder: lipgloss.Color("#585b70"), // surface2
-		codeInline: lipgloss.Color("#313244"), // surface0
+		codeBorder: lipgloss.Color("#585b70"),
+		codeInline: lipgloss.Color("#313244"),
 	},
 	// ── 2. Tokyo Night ────────────────────────────────────────────────────
-	// Deep city-at-night blue.  Inspired by the VSCode theme of the same
-	// name; cool and high-contrast.
 	{
 		name:       "Tokyo Night",
 		chrome:     lipgloss.Color("#1a1b26"),
 		onChrome:   lipgloss.Color("#c0caf5"),
 		text:       lipgloss.Color("#c0caf5"),
-		user:       lipgloss.Color("#7aa2f7"), // blue
-		agent:      lipgloss.Color("#9ece6a"), // green
-		errC:       lipgloss.Color("#f7768e"), // red
-		system:     lipgloss.Color("#565f89"), // comment (muted)
-		loading:    lipgloss.Color("#bb9af7"), // purple
-		codeBg:     lipgloss.Color("#16161e"), // darker bg
+		bg:         lipgloss.Color(""),
+		user:       lipgloss.Color("#7aa2f7"),
+		agent:      lipgloss.Color("#9ece6a"),
+		accent:     lipgloss.Color("#7aa2f7"),
+		errC:       lipgloss.Color("#f7768e"),
+		system:     lipgloss.Color("#565f89"),
+		loading:    lipgloss.Color("#bb9af7"),
+		tokenIn:    lipgloss.Color("#73daca"), // teal
+		tokenOut:   lipgloss.Color("#9ece6a"), // green
+		codeBg:     lipgloss.Color("#16161e"),
 		codeFg:     lipgloss.Color("#c0caf5"),
 		codeBorder: lipgloss.Color("#414868"),
 		codeInline: lipgloss.Color("#292e42"),
 	},
 	// ── 3. Rosé Pine ──────────────────────────────────────────────────────
-	// Warm, muted purple.  Designed for long reading sessions; easy on the
-	// eyes with a cosy, literary feel.
 	{
 		name:       "Rosé Pine",
-		chrome:     lipgloss.Color("#191724"), // base
-		onChrome:   lipgloss.Color("#e0def4"), // text
+		chrome:     lipgloss.Color("#191724"),
+		onChrome:   lipgloss.Color("#e0def4"),
 		text:       lipgloss.Color("#e0def4"),
-		user:       lipgloss.Color("#ebbcba"), // rose
-		agent:      lipgloss.Color("#9ccfd8"), // foam
-		errC:       lipgloss.Color("#eb6f92"), // love
-		system:     lipgloss.Color("#6e6a86"), // muted
-		loading:    lipgloss.Color("#c4a7e7"), // iris
-		codeBg:     lipgloss.Color("#1f1d2e"), // surface
+		bg:         lipgloss.Color(""),
+		user:       lipgloss.Color("#ebbcba"),
+		agent:      lipgloss.Color("#9ccfd8"),
+		accent:     lipgloss.Color("#c4a7e7"), // iris
+		errC:       lipgloss.Color("#eb6f92"),
+		system:     lipgloss.Color("#6e6a86"),
+		loading:    lipgloss.Color("#c4a7e7"),
+		tokenIn:    lipgloss.Color("#ebbcba"), // rose
+		tokenOut:   lipgloss.Color("#9ccfd8"), // foam
+		codeBg:     lipgloss.Color("#1f1d2e"),
 		codeFg:     lipgloss.Color("#e0def4"),
-		codeBorder: lipgloss.Color("#403d52"), // highlight low
-		codeInline: lipgloss.Color("#26233a"), // overlay
+		codeBorder: lipgloss.Color("#403d52"),
+		codeInline: lipgloss.Color("#26233a"),
 	},
 	// ── 4. Nord ───────────────────────────────────────────────────────────
-	// Arctic, cool blue.  Clean, minimal, widely used in system configs and
-	// terminal dotfiles.
 	{
 		name:       "Nord",
-		chrome:     lipgloss.Color("#2e3440"), // polar night 1
-		onChrome:   lipgloss.Color("#eceff4"), // snow storm 3
+		chrome:     lipgloss.Color("#2e3440"),
+		onChrome:   lipgloss.Color("#eceff4"),
 		text:       lipgloss.Color("#eceff4"),
-		user:       lipgloss.Color("#88c0d0"), // frost 3 (cyan)
-		agent:      lipgloss.Color("#a3be8c"), // aurora green
-		errC:       lipgloss.Color("#bf616a"), // aurora red
-		system:     lipgloss.Color("#4c566a"), // polar night 4 (muted)
-		loading:    lipgloss.Color("#81a1c1"), // frost 2
-		codeBg:     lipgloss.Color("#242933"), // between polar nights
+		bg:         lipgloss.Color(""),
+		user:       lipgloss.Color("#88c0d0"),
+		agent:      lipgloss.Color("#a3be8c"),
+		accent:     lipgloss.Color("#88c0d0"), // frost cyan
+		errC:       lipgloss.Color("#bf616a"),
+		system:     lipgloss.Color("#4c566a"),
+		loading:    lipgloss.Color("#81a1c1"),
+		tokenIn:    lipgloss.Color("#88c0d0"), // frost 3
+		tokenOut:   lipgloss.Color("#a3be8c"), // aurora green
+		codeBg:     lipgloss.Color("#242933"),
 		codeFg:     lipgloss.Color("#eceff4"),
-		codeBorder: lipgloss.Color("#434c5e"), // polar night 3
-		codeInline: lipgloss.Color("#3b4252"), // polar night 2
+		codeBorder: lipgloss.Color("#434c5e"),
+		codeInline: lipgloss.Color("#3b4252"),
 	},
 	// ── 5. Gruvbox ────────────────────────────────────────────────────────
-	// Warm, earthy retro.  High-contrast with amber/terracotta accents;
-	// a classic in the Vim/Neovim community.
 	{
 		name:       "Gruvbox",
-		chrome:     lipgloss.Color("#282828"), // bg hard
-		onChrome:   lipgloss.Color("#ebdbb2"), // fg1
+		chrome:     lipgloss.Color("#282828"),
+		onChrome:   lipgloss.Color("#ebdbb2"),
 		text:       lipgloss.Color("#ebdbb2"),
-		user:       lipgloss.Color("#83a598"), // aqua
-		agent:      lipgloss.Color("#b8bb26"), // bright green
-		errC:       lipgloss.Color("#fb4934"), // bright red
-		system:     lipgloss.Color("#928374"), // gray
-		loading:    lipgloss.Color("#d3869b"), // bright purple
-		codeBg:     lipgloss.Color("#1d2021"), // bg hard (darkest)
+		bg:         lipgloss.Color(""),
+		user:       lipgloss.Color("#83a598"),
+		agent:      lipgloss.Color("#b8bb26"),
+		accent:     lipgloss.Color("#fabd2f"), // bright yellow
+		errC:       lipgloss.Color("#fb4934"),
+		system:     lipgloss.Color("#928374"),
+		loading:    lipgloss.Color("#d3869b"),
+		tokenIn:    lipgloss.Color("#83a598"), // aqua
+		tokenOut:   lipgloss.Color("#b8bb26"), // green
+		codeBg:     lipgloss.Color("#1d2021"),
 		codeFg:     lipgloss.Color("#ebdbb2"),
-		codeBorder: lipgloss.Color("#504945"), // bg3
-		codeInline: lipgloss.Color("#3c3836"), // bg1
+		codeBorder: lipgloss.Color("#504945"),
+		codeInline: lipgloss.Color("#3c3836"),
+	},
+
+	// ── 6. GitHub Light ───────────────────────────────────────────────────
+	{
+		name:       "GitHub Light",
+		chrome:     lipgloss.Color("#f6f8fa"),
+		onChrome:   lipgloss.Color("#24292f"),
+		text:       lipgloss.Color("#24292f"),
+		bg:         lipgloss.Color("#ffffff"), // explicit white fill
+		user:       lipgloss.Color("#0550ae"),
+		agent:      lipgloss.Color("#116329"),
+		accent:     lipgloss.Color("#0550ae"), // blue border
+		errC:       lipgloss.Color("#82071e"),
+		system:     lipgloss.Color("#57606a"),
+		loading:    lipgloss.Color("#8250df"),
+		tokenIn:    lipgloss.Color("#0550ae"), // blue
+		tokenOut:   lipgloss.Color("#116329"), // green
+		codeBg:     lipgloss.Color("#f6f8fa"),
+		codeFg:     lipgloss.Color("#24292f"),
+		codeBorder: lipgloss.Color("#d0d7de"),
+		codeInline: lipgloss.Color("#eaeef2"),
+	},
+
+	// ── 7. Solarized Light ────────────────────────────────────────────────
+	{
+		name:       "Solarized Light",
+		chrome:     lipgloss.Color("#eee8d5"),
+		onChrome:   lipgloss.Color("#657b83"),
+		text:       lipgloss.Color("#657b83"),
+		bg:         lipgloss.Color("#fdf6e3"), // base3 warm cream
+		user:       lipgloss.Color("#268bd2"),
+		agent:      lipgloss.Color("#859900"),
+		accent:     lipgloss.Color("#2aa198"), // cyan
+		errC:       lipgloss.Color("#dc322f"),
+		system:     lipgloss.Color("#93a1a1"),
+		loading:    lipgloss.Color("#6c71c4"),
+		tokenIn:    lipgloss.Color("#268bd2"), // blue
+		tokenOut:   lipgloss.Color("#2aa198"), // cyan
+		codeBg:     lipgloss.Color("#fdf6e3"),
+		codeFg:     lipgloss.Color("#586e75"),
+		codeBorder: lipgloss.Color("#93a1a1"),
+		codeInline: lipgloss.Color("#e8e0c8"),
+	},
+
+	// ── 8. Tango (Cyan) ───────────────────────────────────────────────────
+	{
+		name:       "Tango",
+		chrome:     lipgloss.Color("#d3eef9"),
+		onChrome:   lipgloss.Color("#204a87"),
+		text:       lipgloss.Color("#2e3436"),
+		bg:         lipgloss.Color("#e8f4fb"), // light cyan fill
+		user:       lipgloss.Color("#204a87"),
+		agent:      lipgloss.Color("#4e9a06"),
+		accent:     lipgloss.Color("#3465a4"), // tango blue
+		errC:       lipgloss.Color("#cc0000"),
+		system:     lipgloss.Color("#888a85"),
+		loading:    lipgloss.Color("#75507b"),
+		tokenIn:    lipgloss.Color("#3465a4"), // blue
+		tokenOut:   lipgloss.Color("#4e9a06"), // green
+		codeBg:     lipgloss.Color("#e8f4fb"),
+		codeFg:     lipgloss.Color("#2e3436"),
+		codeBorder: lipgloss.Color("#a8d8ea"),
+		codeInline: lipgloss.Color("#d3eef9"),
 	},
 }
 
@@ -179,6 +258,19 @@ type styledSet struct {
 	prompt     lipgloss.Style
 	help       lipgloss.Style
 
+	// Input box border (accent color, rounded corners).
+	inputBox lipgloss.Style
+	// Full-width background fill for light themes (empty bg = no-op for dark).
+	viewBg lipgloss.Style
+	// Full-width background for footer/chrome on light themes (empty = transparent).
+	chromeBg lipgloss.Style
+	// Token counter — distinct colors for in/out/total.
+	tokenIn    lipgloss.Style
+	tokenOut   lipgloss.Style
+	tokenTotal lipgloss.Style
+	// Provider/model name in footer.
+	providerName lipgloss.Style
+
 	// Raw colours passed through to the code-block renderer in markdown.go.
 	codeBg     lipgloss.TerminalColor
 	codeFg     lipgloss.TerminalColor
@@ -187,40 +279,59 @@ type styledSet struct {
 }
 
 func makeStyles(p palette) styledSet {
+	// bg applies the theme's explicit background colour to a style.
+	// For dark themes p.bg is "" — Background("") is a no-op in lipgloss,
+	// so dark styles remain transparent (terminal default).
+	bg := func(s lipgloss.Style) lipgloss.Style {
+		if p.bg == lipgloss.Color("") {
+			return s
+		}
+		return s.Background(p.bg)
+	}
+
+	// viewBg / chromeBg: plain fill styles used for viewport and chrome areas.
+	viewBgStyle := lipgloss.NewStyle()
+	chromeBgStyle := lipgloss.NewStyle()
+	if p.bg != lipgloss.Color("") {
+		viewBgStyle = lipgloss.NewStyle().Background(p.bg)
+		chromeBgStyle = lipgloss.NewStyle().Background(p.bg)
+	}
+
 	return styledSet{
-		// No themeIdx here — callers set it after construction.
-		// Header: bold text on the chrome background.
+		// Header always uses its own chrome colour — not the body bg.
 		header: lipgloss.NewStyle().Bold(true).
 			Foreground(p.onChrome).Background(p.chrome).Padding(0, 1),
 
-		// Separator: a muted horizontal rule.
-		sep: lipgloss.NewStyle().Foreground(p.system),
+		sep: bg(lipgloss.NewStyle().Foreground(p.system)),
 
-		// User message: colored bold label, readable body text.
-		userLabel: lipgloss.NewStyle().Bold(true).Foreground(p.user),
-		userText:  lipgloss.NewStyle().Foreground(p.text),
+		userLabel: bg(lipgloss.NewStyle().Bold(true).Foreground(p.user)),
+		userText:  bg(lipgloss.NewStyle().Foreground(p.text)),
 
-		// Agent reply: colored bold label, readable body text.
-		agentLabel: lipgloss.NewStyle().Bold(true).Foreground(p.agent),
-		agentText:  lipgloss.NewStyle().Foreground(p.text),
+		agentLabel: bg(lipgloss.NewStyle().Bold(true).Foreground(p.agent)),
+		agentText:  bg(lipgloss.NewStyle().Foreground(p.text)),
 
-		// Errors: accent-coloured label and body for immediate visibility.
-		errorLabel: lipgloss.NewStyle().Bold(true).Foreground(p.errC),
-		errorText:  lipgloss.NewStyle().Foreground(p.errC),
+		errorLabel: bg(lipgloss.NewStyle().Bold(true).Foreground(p.errC)),
+		errorText:  bg(lipgloss.NewStyle().Foreground(p.errC)),
 
-		// System: dim italic — timestamps, status notes.
-		system: lipgloss.NewStyle().Foreground(p.system).Italic(true),
+		system:  bg(lipgloss.NewStyle().Foreground(p.system).Italic(true)),
+		loading: bg(lipgloss.NewStyle().Foreground(p.loading)),
+		prompt:  bg(lipgloss.NewStyle().Bold(true).Foreground(p.user)),
+		help:    bg(lipgloss.NewStyle().Foreground(p.system).Italic(true)),
 
-		// Loading: spinner + "Thinking…" line.
-		loading: lipgloss.NewStyle().Foreground(p.loading),
+		inputBox: lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(p.accent).
+			Background(p.bg).
+			Padding(0, 1),
 
-		// Prompt prefix "> ".
-		prompt: lipgloss.NewStyle().Bold(true).Foreground(p.user),
+		viewBg:   viewBgStyle,
+		chromeBg: chromeBgStyle,
 
-		// Footer hint text.
-		help: lipgloss.NewStyle().Foreground(p.system).Italic(true),
+		tokenIn:      bg(lipgloss.NewStyle().Bold(true).Foreground(p.tokenIn)),
+		tokenOut:     bg(lipgloss.NewStyle().Bold(true).Foreground(p.tokenOut)),
+		tokenTotal:   bg(lipgloss.NewStyle().Foreground(p.system)),
+		providerName: bg(lipgloss.NewStyle().Bold(true).Foreground(p.accent)),
 
-		// Code block — raw colours for the box-drawing renderer.
 		codeBg:     p.codeBg,
 		codeFg:     p.codeFg,
 		codeBorder: p.codeBorder,
@@ -268,19 +379,50 @@ func hardWrapText(text string, maxW int) string {
 	return out.String()
 }
 
+// fillLines pads every line in content to exactly w visible columns by
+// appending spaces rendered with bgStyle.  This is the single point of truth
+// for right-edge fill: apply it at every viewport SetContent call and every
+// View() component boundary so no terminal-default cells are ever exposed on
+// light themes.  For dark themes bgStyle is empty so the call is a cheap no-op.
+func fillLines(content string, w int, bgStyle lipgloss.Style) string {
+	if w <= 0 {
+		return content
+	}
+	lines := strings.Split(content, "\n")
+	var sb strings.Builder
+	sb.Grow(len(content) + len(lines)*8)
+	for i, line := range lines {
+		lw := lipgloss.Width(line)
+		sb.WriteString(line)
+		if pad := w - lw; pad > 0 {
+			sb.WriteString(bgStyle.Render(strings.Repeat(" ", pad)))
+		}
+		if i < len(lines)-1 {
+			sb.WriteByte('\n')
+		}
+	}
+	return sb.String()
+}
+
 // labelLine renders "Label           HH:MM" with the timestamp right-aligned
-// to contentW columns.  If at is the zero time, only the label is returned.
-func labelLine(labelStyle, tsStyle lipgloss.Style, label string, at time.Time, contentW int) string {
+// to fullW columns.  Padding spaces are rendered with bgStyle so that on light
+// themes the entire row carries the theme background colour.
+// If at is the zero time, only the label is returned (padded to fullW).
+func labelLine(labelStyle, tsStyle, bgStyle lipgloss.Style, label string, at time.Time, fullW int) string {
 	left := labelStyle.Render(label)
 	if at.IsZero() {
+		trail := fullW - lipgloss.Width(left)
+		if trail > 0 {
+			return left + bgStyle.Render(strings.Repeat(" ", trail)) + "\n"
+		}
 		return left + "\n"
 	}
 	right := tsStyle.Render(at.Format("15:04"))
-	pad := contentW - lipgloss.Width(left) - lipgloss.Width(right)
+	pad := fullW - lipgloss.Width(left) - lipgloss.Width(right)
 	if pad < 1 {
 		pad = 1
 	}
-	return left + strings.Repeat(" ", pad) + right + "\n"
+	return left + bgStyle.Render(strings.Repeat(" ", pad)) + right + "\n"
 }
 
 // oneShotTimer delivers msg after d by blocking in a background goroutine.
@@ -294,18 +436,18 @@ func oneShotTimer(d time.Duration, msg tea.Msg) tea.Cmd {
 
 // calcInputHeight returns the number of textarea rows needed to display text
 // without horizontal scrolling.  effectiveWidth is the characters available
-// per line after the "> " prompt; maxH caps the result.
+// per line (no prompt); maxH caps the result.  minH is the minimum height.
 func calcInputHeight(text string, effectiveWidth, maxH int) int {
 	if effectiveWidth <= 0 || maxH <= 0 {
-		return 1
+		return 3
 	}
 	runes := []rune(text)
 	if len(runes) == 0 {
-		return 1
+		return 3
 	}
 	h := (len(runes) + effectiveWidth - 1) / effectiveWidth
-	if h < 1 {
-		h = 1
+	if h < 3 {
+		h = 3
 	}
 	if h > maxH {
 		h = maxH
@@ -360,6 +502,15 @@ type streamChunkMsg struct {
 // statusClearMsg is delivered by oneShotTimer to erase the temporary status bar.
 type statusClearMsg struct{}
 
+// switchModelMsg carries the result of an async model-switch command.
+// On success, newRunner and newModelName are set and err is nil.
+// On failure, err describes why the switch failed.
+type switchModelMsg struct {
+	newRunner    *runner.Runner
+	newModelName string
+	err          error
+}
+
 // ── Bubbletea model ───────────────────────────────────────────────────────────
 
 // chatModel is the root Bubbletea model.  It owns:
@@ -369,7 +520,7 @@ type statusClearMsg struct{}
 //
 // Features wired in:
 //   - ↑/↓       shell-style input history cycling
-//   - t          cycle colour theme (only when input empty)
+//   - /theme     cycle colour theme
 //   - /settings  open settings overlay (theme + char limit)
 //   - /help      toggle help overlay (also ?/esc when input empty)
 //   - esc        close settings overlay / dismiss help
@@ -393,7 +544,7 @@ type chatModel struct {
 	width         int       // current terminal width
 	height        int       // current terminal height
 
-	themeIdx int  // index into builtinThemes; cycled by 't'
+	themeIdx int  // index into builtinThemes; cycled by /theme
 	showHelp bool // true when the help overlay is displayed in the viewport
 
 	// Cumulative token counts across all completed turns.
@@ -418,6 +569,18 @@ type chatModel struct {
 	settingsCharLimit int
 	mouseEnabled      bool // tracks mouse mode for ctrl+t toggle
 
+	// Model picker overlay (/model command).
+	modelPickerMode bool
+	modelPicker     modelPickerState
+
+	// Theme picker overlay (/theme command).
+	themePickerMode bool
+	themePickerIdx  int // highlighted row in theme picker
+
+	// activeProviderIDs are the provider name substrings from the failover
+	// chain, used to filter the /model picker to only configured providers.
+	activeProviderIDs []string
+
 	runner     *runner.Runner
 	sessionSvc session.Service
 	memorySvc  memory.Service // nil when GOOGLE_API_KEY is not set
@@ -434,33 +597,60 @@ func (m chatModel) styles() styledSet {
 	return s
 }
 
+
+// displayModelName returns a short model name suitable for the header.
+// For a failover chain like "failover(github-models/gpt-4o → groq/llama...)"
+// it returns just the primary part "github-models/gpt-4o".
+// For a plain name it returns it unchanged.
+func (m chatModel) displayModelName() string {
+	s := m.modelName
+	if idx := strings.Index(s, "("); idx >= 0 {
+		s = s[idx+1:]
+		if end := strings.Index(s, " →"); end >= 0 {
+			s = s[:end]
+		} else if end := strings.LastIndex(s, ")"); end >= 0 {
+			s = s[:end]
+		}
+	}
+	return strings.TrimSpace(s)
+}
+
 // newChatModel constructs the initial chatModel.  The viewport is not yet
 // sized — that happens on the first tea.WindowSizeMsg.
-func newChatModel(r *runner.Runner, svc session.Service, memorySvc memory.Service, modelName string) chatModel {
+// activeProviderIDs is the list of provider name substrings from the failover
+// chain (used to filter the /model picker to only configured providers).
+func newChatModel(r *runner.Runner, svc session.Service, memorySvc memory.Service, modelName string, activeProviderIDs []string) chatModel {
 	ti := textarea.New()
-	ti.Placeholder = "Type a message and press Enter…"
-	ti.Prompt = "  "     // indent only — no visible prompt glyph
+	ti.Placeholder = "Type your message or @path/to/file"
+	ti.Prompt = ""
 	ti.ShowLineNumbers = false
 	ti.CharLimit = 2000
 	ti.KeyMap.InsertNewline.SetEnabled(false) // Enter sends; Shift+Enter would insert newline
-	ti.SetHeight(1)                           // grows dynamically as content wraps
-	ti.Focus()                               // ignore returned Cmd; Init() fires textarea.Blink
+	ti.SetHeight(3)                           // default 3 lines; grows dynamically as content wraps
+	// Remove the textarea's own border — we wrap it in a lipgloss box instead.
+	ti.FocusedStyle.Base = lipgloss.NewStyle()
+	ti.BlurredStyle.Base = lipgloss.NewStyle()
+	// Remove the black CursorLine background so the theme bg shows through.
+	ti.FocusedStyle.CursorLine = lipgloss.NewStyle()
+	ti.BlurredStyle.CursorLine = lipgloss.NewStyle()
+	ti.Focus() // ignore returned Cmd; Init() fires textarea.Blink
 
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
 	sp.Style = makeStyles(builtinThemes[0]).loading
 
 	return chatModel{
-		textInput:    ti,
-		spinner:      sp,
-		userID:       "tui-user",
-		sessionID:    "tui-session",
-		runner:       r,
-		sessionSvc:   svc,
-		memorySvc:    memorySvc,
-		historyIdx:   -1,
-		slashMenuIdx: 0,
-		mouseEnabled: true,
+		textInput:         ti,
+		spinner:           sp,
+		userID:            "tui-user",
+		sessionID:         "tui-session",
+		runner:            r,
+		sessionSvc:        svc,
+		memorySvc:         memorySvc,
+		historyIdx:        -1,
+		slashMenuIdx:      0,
+		mouseEnabled:      true,
+		activeProviderIDs: activeProviderIDs,
 		msgs: []chatMsg{{
 			role: "system",
 			text: "Session started",
@@ -472,7 +662,10 @@ func newChatModel(r *runner.Runner, svc session.Service, memorySvc memory.Servic
 
 // Init issues the initial commands: cursor blinking and the spinner tick loop.
 func (m chatModel) Init() tea.Cmd {
-	return tea.Batch(textarea.Blink, m.spinner.Tick)
+	return tea.Batch(
+		textarea.Blink,
+		m.spinner.Tick,
+	)
 }
 
 // ── Update ────────────────────────────────────────────────────────────────────
@@ -484,10 +677,10 @@ func (m chatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if wm, ok := msg.(tea.WindowSizeMsg); ok {
 		m.width = wm.Width
 		m.height = wm.Height
-		m.textInput.SetWidth(wm.Width - 5) // prompt + right margin
+		m.textInput.SetWidth(wm.Width - 6) // 4 box border+padding (no prompt)
 		// Re-fit input height at the new width before measuring layout.
-		if wm.Width > 7 {
-			m.textInput.SetHeight(calcInputHeight(m.textInput.Value(), wm.Width-7, 5))
+		if wm.Width > 6 {
+			m.textInput.SetHeight(calcInputHeight(m.textInput.Value(), wm.Width-6, 5))
 		}
 
 		s := m.styles()
@@ -511,11 +704,13 @@ func (m chatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				Up:           key.NewBinding(key.WithKeys("up")),
 				Down:         key.NewBinding(key.WithKeys("down")),
 			}
-			m.viewport.SetContent(m.renderMessages(s))
+			m.setViewportContent(s, m.renderMessages(s))
 			m.ready = true
+			m.applyThemeToTextarea()
 		} else {
 			m.viewport.Width = wm.Width
 			m.viewport.Height = vpH
+			m.applyThemeToTextarea() // refresh Base.Width after resize
 			m.refreshViewport()
 		}
 
@@ -526,274 +721,44 @@ func (m chatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	// ── Terminal focus / blur (e.g. switching tabs) ───────────────────────
+	// Re-focus the textarea when the terminal window regains focus so the
+	// user can type immediately without clicking.
+	switch msg.(type) {
+	case tea.FocusMsg:
+		return m, m.textInput.Focus()
+	case tea.BlurMsg:
+		m.textInput.Blur()
+		return m, nil
+	}
+
 	// ── Settings overlay intercepts all non-resize events ─────────────────
 	if m.settingsMode {
 		return m.updateSettings(msg)
 	}
 
+	// ── Model picker overlay intercepts keyboard when open ─────────────────
+	if m.modelPickerMode {
+		return m.updateModelPicker(msg)
+	}
+
+	// ── Theme picker overlay intercepts keyboard when open ────────────────
+	if m.themePickerMode {
+		return m.updateThemePicker(msg)
+	}
 	switch msg := msg.(type) {
 
 	// ── Keyboard ──────────────────────────────────────────────────────────
 	case tea.KeyMsg:
-		switch msg.String() {
-
-		case "ctrl+c":
-			return m, tea.Quit
-
-		// ── esc: dismiss help overlay ─────────────────────────────────
-		case "esc":
-			// Close slash menu if open.
-			if slashMenuVisible(m.textInput.Value()) {
-				m.textInput.Reset()
-				m.slashMenuIdx = 0
-				return m, nil
-			}
-			if m.showHelp {
-				m.showHelp = false
-				m.refreshViewport()
-				return m, nil
-			}
-
-		// ── ctrl+l: clear history ─────────────────────────────────────
-		case "ctrl+l":
-			m.msgs = []chatMsg{{
-				role: "system",
-				text: "Session started",
-				at:   time.Now(),
-			}}
-			m.streamingText = ""
-			m.showHelp = false
-			m.refreshViewport()
-			return m, nil
-
-		// ── ctrl+t: toggle mouse on/off for scroll vs copy ───────────
-		case "ctrl+t":
-			m.mouseEnabled = !m.mouseEnabled
-			if m.mouseEnabled {
-				m.statusMsg = "Scroll mode — touchpad scrolls"
-				return m, tea.Batch(
-					oneShotTimer(2*time.Second, statusClearMsg{}),
-					func() tea.Msg { return tea.EnableMouseCellMotion() },
-				)
-			}
-			m.statusMsg = "Copy mode — select text freely  (ctrl+t to scroll)"
-			return m, tea.Batch(
-				oneShotTimer(3*time.Second, statusClearMsg{}),
-				func() tea.Msg { return tea.DisableMouse() },
-			)
-
-		// ── ctrl+s: save session ──────────────────────────────────────
-		case "ctrl+s":
-			if !m.loading {
-				path, err := saveSession(m.msgs)
-				if err != nil {
-					m.statusMsg = "Save failed: " + err.Error()
-				} else {
-					m.statusMsg = "Saved → " + path
-				}
-				cmds = append(cmds, oneShotTimer(3*time.Second, statusClearMsg{}))
-				m.refreshViewport()
-				return m, tea.Batch(cmds...)
-			}
-
-		// ── ctrl+y: copy last agent reply ─────────────────────────────
-		case "ctrl+y":
-			for i := len(m.msgs) - 1; i >= 0; i-- {
-				if m.msgs[i].role == "agent" {
-					content, label := smartCopy(m.msgs[i].text)
-					if err := copyToClipboard(content); err != nil {
-						m.statusMsg = "Copy failed: " + err.Error()
-					} else {
-						m.statusMsg = label
-					}
-					cmds = append(cmds, oneShotTimer(2*time.Second, statusClearMsg{}))
-					m.refreshViewport()
-					return m, tea.Batch(cmds...)
-				}
-			}
-
-		// ── ?: toggle help overlay ────────────────────────────────────
-		case "?":
-			// Only when the input box is empty so '?' is not typed into it.
-			if m.textInput.Value() == "" {
-				m.showHelp = !m.showHelp
-				m.refreshViewport()
-				return m, nil
-			}
-
-		// ── t: cycle colour theme ─────────────────────────────────────
-		case "t":
-			if m.textInput.Value() == "" {
-				m.themeIdx = (m.themeIdx + 1) % len(builtinThemes)
-				invalidateRendererCache()
-				m.spinner.Style = m.styles().loading // keep spinner colour in sync
-				m.refreshViewport()
-				return m, nil
-			}
-
-		// ── ↑: slash menu navigation OR input history ────────────────
-		case "up":
-			val := m.textInput.Value()
-			if slashMenuVisible(val) {
-				matches := slashMatches(val)
-				if m.slashMenuIdx > 0 {
-					m.slashMenuIdx--
-				}
-				_ = matches
-				return m, nil
-			}
-			if !m.loading && len(m.inputHistory) > 0 {
-				if m.historyIdx == -1 {
-					m.inputDraft = m.textInput.Value()
-					m.historyIdx = len(m.inputHistory) - 1
-				} else if m.historyIdx > 0 {
-					m.historyIdx--
-				}
-				m.textInput.SetValue(m.inputHistory[m.historyIdx])
-				m.textInput.CursorEnd()
-				if m.width > 7 {
-					m.textInput.SetHeight(calcInputHeight(m.textInput.Value(), m.width-7, 5))
-				}
-				return m, nil
-			}
-			// No history → fall through so the viewport can scroll.
-
-		// ── ↓: slash menu navigation OR input history ────────────────
-		case "down":
-			val := m.textInput.Value()
-			if slashMenuVisible(val) {
-				matches := slashMatches(val)
-				if m.slashMenuIdx < len(matches)-1 {
-					m.slashMenuIdx++
-				}
-				return m, nil
-			}
-			if m.historyIdx != -1 {
-				if m.historyIdx < len(m.inputHistory)-1 {
-					m.historyIdx++
-					m.textInput.SetValue(m.inputHistory[m.historyIdx])
-				} else {
-					m.historyIdx = -1
-					m.textInput.SetValue(m.inputDraft)
-					m.inputDraft = ""
-				}
-				m.textInput.CursorEnd()
-				if m.width > 7 {
-					m.textInput.SetHeight(calcInputHeight(m.textInput.Value(), m.width-7, 5))
-				}
-				return m, nil
-			}
-			// Not browsing → fall through so the viewport can scroll.
-
-		// ── tab: complete slash command ───────────────────────────────
-		case "tab":
-			val := m.textInput.Value()
-			if slashMenuVisible(val) {
-				matches := slashMatches(val)
-				idx := m.slashMenuIdx
-				if idx >= len(matches) {
-					idx = 0
-				}
-				m.textInput.SetValue(matches[idx].name)
-				m.textInput.CursorEnd()
-				m.slashMenuIdx = 0
-				return m, nil
-			}
-
-		// ── enter: send message or execute slash command ─────────────
-		case "enter":
-			if m.loading {
-				break
-			}
-
-			// If the slash menu is open and has a selection, complete it
-			// unless the user has already typed the full command name.
-			val := m.textInput.Value()
-			if slashMenuVisible(val) {
-				matches := slashMatches(val)
-				if len(matches) > 1 {
-					// Multiple matches: complete instead of executing.
-					idx := m.slashMenuIdx
-					if idx >= len(matches) {
-						idx = 0
-					}
-					m.textInput.SetValue(matches[idx].name)
-					m.textInput.CursorEnd()
-					m.slashMenuIdx = 0
-					return m, nil
-				}
-				// Exactly one match: fall through to execute it below.
-			}
-
-			input := strings.TrimSpace(m.textInput.Value())
-			if input == "" {
-				break
-			}
-			m.slashMenuIdx = 0
-
-			// ── Slash commands ─────────────────────────────────────────
-			switch strings.ToLower(input) {
-			case "/settings":
-				m.textInput.Reset()
-				m.settingsThemeIdx = m.themeIdx
-				m.settingsCharLimit = m.textInput.CharLimit
-				m.settingsForm = buildSettingsForm(&m.settingsThemeIdx, &m.settingsCharLimit).
-					WithWidth(m.width - 4)
-				m.settingsMode = true
-				return m, m.settingsForm.Init()
-
-			case "/help":
-				m.textInput.Reset()
-				m.showHelp = !m.showHelp
-				m.refreshViewport()
-				return m, nil
-
-			case "/clear":
-				m.textInput.Reset()
-				m.msgs = []chatMsg{{
-					role: "system",
-					text: "Session started",
-					at:   time.Now(),
-				}}
-				m.streamingText = ""
-				m.showHelp = false
-				m.refreshViewport()
-				return m, nil
-
-			case "/theme":
-				m.textInput.Reset()
-				m.themeIdx = (m.themeIdx + 1) % len(builtinThemes)
-				invalidateRendererCache()
-				m.spinner.Style = m.styles().loading
-				m.refreshViewport()
-				return m, nil
-
-			case "/skills":
-				m.textInput.Reset()
-				m.showHelp = false
-				m.msgs = append(m.msgs, chatMsg{
-					role: "system",
-					text: listSkillsSummary(),
-					at:   time.Now(),
-				})
-				m.refreshViewport()
-				return m, nil
-			}
-
-			// Not a slash command — send to agent.
-			m.showHelp = false
-			// Record in history; avoid consecutive duplicates.
-			if len(m.inputHistory) == 0 || m.inputHistory[len(m.inputHistory)-1] != input {
-				m.inputHistory = append(m.inputHistory, input)
-			}
-			m.historyIdx = -1
-			m.inputDraft = ""
-			m.msgs = append(m.msgs, chatMsg{role: "user", text: input, at: time.Now()})
-			m.textInput.Reset()
-			m.loading = true
-			m.refreshViewport()
-			cmds = append(cmds, m.spinner.Tick, m.startAgentStream(input))
+		// If the textarea lost focus (e.g. terminal window switched away and
+		// back without a FocusMsg, or the terminal doesn't support focus
+		// reporting), re-focus on the very first keypress — no click needed.
+		var refocusCmd tea.Cmd
+		if !m.textInput.Focused() {
+			refocusCmd = m.textInput.Focus()
 		}
+		m2, cmd := m.handleKey(msg)
+		return m2, tea.Batch(refocusCmd, cmd)
 
 	// ── Streaming chunk ───────────────────────────────────────────────────
 	case streamChunkMsg:
@@ -834,6 +799,28 @@ func (m chatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// ── Status bar expiry ─────────────────────────────────────────────────
 	case statusClearMsg:
 		m.statusMsg = ""
+
+	// ── Model switch result ───────────────────────────────────────────────
+	case switchModelMsg:
+		m.loading = false
+		if msg.err != nil {
+			m.msgs = append(m.msgs, chatMsg{
+				role: "error",
+				text: "Model switch failed: " + msg.err.Error(),
+				at:   time.Now(),
+			})
+		} else {
+			m.runner = msg.newRunner
+			m.modelName = msg.newModelName
+			m.statusMsg = "Switched to " + msg.newModelName
+			m.msgs = append(m.msgs, chatMsg{
+				role: "system",
+				text: "Model switched to **" + msg.newModelName + "**",
+				at:   time.Now(),
+			})
+			cmds = append(cmds, oneShotTimer(3*time.Second, statusClearMsg{}))
+		}
+		m.refreshViewport()
 
 	// ── Spinner tick ──────────────────────────────────────────────────────
 	case spinner.TickMsg:
@@ -876,8 +863,9 @@ func (m chatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	// Dynamic textarea height + viewport resize after any input change.
-	if m.ready && m.width > 7 {
-		newH := calcInputHeight(m.textInput.Value(), m.width-7, 5)
+	// effectiveW = SetWidth arg (no prompt) = m.width-6
+	if m.ready && m.width > 6 {
+		newH := calcInputHeight(m.textInput.Value(), m.width-6, 5)
 		m.textInput.SetHeight(newH)
 		s2 := m.styles()
 		headerH := lipgloss.Height(m.headerView(s2))
@@ -903,7 +891,7 @@ func (m chatModel) updateSettings(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// consume it for field navigation without closing the overlay.
 			m.settingsMode = false
 			m.settingsForm = nil
-			return m, nil
+			return m, m.textInput.Focus()
 		}
 	}
 
@@ -915,30 +903,183 @@ func (m chatModel) updateSettings(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Apply the chosen values.
 		m.themeIdx = m.settingsThemeIdx
 		invalidateRendererCache()
+		m.applyThemeToTextarea()
 		m.textInput.CharLimit = m.settingsCharLimit
 		m.spinner.Style = m.styles().loading
 		m.settingsMode = false
 		m.settingsForm = nil
 		m.refreshViewport()
-		return m, nil
+		return m, m.textInput.Focus()
 
 	case huh.StateAborted:
 		// huh internally aborted (e.g. ctrl+c inside form) — discard changes.
 		m.settingsMode = false
 		m.settingsForm = nil
-		return m, nil
+		return m, m.textInput.Focus()
 	}
 
 	return m, cmd
 }
 
-// ── View ──────────────────────────────────────────────────────────────────────
+// updateModelPicker handles all input events while the model picker overlay is
+// open.  ctrl+c quits, esc goes back (or closes), ↑/↓ navigates, enter selects.
+func (m chatModel) updateModelPicker(msg tea.Msg) (tea.Model, tea.Cmd) {
+	km, ok := msg.(tea.KeyMsg)
+	if !ok {
+		return m, nil
+	}
+	switch km.String() {
+	case "ctrl+c":
+		return m, tea.Quit
+	case "esc":
+		if m.modelPicker.pickerBack() {
+			m.modelPickerMode = false
+			m.refreshViewport()
+			return m, m.textInput.Focus()
+		} else {
+			m.refreshViewportModelPicker()
+		}
+	case "up":
+		m.modelPicker.pickerMoveUp()
+		m.refreshViewportModelPicker()
+	case "down":
+		m.modelPicker.pickerMoveDown()
+		m.refreshViewportModelPicker()
+	case "enter":
+		providerID, modelID, done := m.modelPicker.pickerConfirm()
+		if done {
+			m.modelPickerMode = false
+			m.loading = true
+			m.refreshViewport()
+			return m, tea.Batch(m.textInput.Focus(), m.spinner.Tick, switchModelCmd(providerID, modelID, m.sessionSvc, m.memorySvc))
+		}
+		// Advanced to model stage — re-render.
+		m.refreshViewportModelPicker()
+	}
+	return m, nil
+}
+
+// refreshViewportModelPicker renders the picker content into the viewport.
+func (m *chatModel) refreshViewportModelPicker() {
+	s := m.styles()
+	content := m.modelPicker.pickerView(s, m.width)
+	m.setViewportContent(s, content)
+	m.viewport.GotoTop()
+}
+
+// ── Theme picker ──────────────────────────────────────────────────────────────
+
+func (m chatModel) updateThemePicker(msg tea.Msg) (tea.Model, tea.Cmd) {
+	key, ok := msg.(tea.KeyMsg)
+	if !ok {
+		return m, nil
+	}
+	switch key.String() {
+	case "ctrl+c":
+		return m, tea.Quit
+	case "esc":
+		m.themePickerMode = false
+		m.refreshViewport()
+		return m, m.textInput.Focus()
+	case "up", "k":
+		if m.themePickerIdx > 0 {
+			m.themePickerIdx--
+		}
+		m.refreshViewportThemePicker()
+	case "down", "j":
+		if m.themePickerIdx < len(builtinThemes)-1 {
+			m.themePickerIdx++
+		}
+		m.refreshViewportThemePicker()
+	case "enter", " ":
+		m.themeIdx = m.themePickerIdx
+		invalidateRendererCache()
+		m.applyThemeToTextarea()
+		m.spinner.Style = m.styles().loading
+		m.themePickerMode = false
+		m.refreshViewport()
+		return m, m.textInput.Focus()
+	}
+	return m, nil
+}
+
+func (m *chatModel) refreshViewportThemePicker() {
+	s := m.styles()
+	m.setViewportContent(s, m.themePickerView(s))
+	m.viewport.GotoTop()
+}
+
+func (m chatModel) themePickerView(s styledSet) string {
+	var sb strings.Builder
+
+	// Title line: pad to full width with chromeBg so no dark strip on right.
+	titleContent := s.agentLabel.Render("Select Theme") +
+		s.system.Render("  esc: cancel  •  ↑/↓: navigate  •  enter: apply")
+	titlePad := m.width - lipgloss.Width(titleContent)
+	if titlePad < 0 {
+		titlePad = 0
+	}
+	sb.WriteString(titleContent + s.chromeBg.Render(strings.Repeat(" ", titlePad)) + "\n\n")
+
+	rowW := m.width
+	if rowW < 10 {
+		rowW = 10
+	}
+
+	for i, p := range builtinThemes {
+		// Swatch: render the theme name in its own chrome colours as a preview.
+		swatchW := 22
+		swatch := lipgloss.NewStyle().
+			Bold(true).
+			Foreground(p.onChrome).
+			Background(p.chrome).
+			Padding(0, 1).
+			Width(swatchW).
+			Render(p.name)
+
+		activeMark := "  "
+		if i == m.themeIdx {
+			activeMark = " ●"
+		}
+
+		var cursor string
+		if i == m.themePickerIdx {
+			cursor = s.agentLabel.Render(">")
+		} else {
+			cursor = s.system.Render(" ")
+		}
+
+		// Build the full row content (cursor + mark + swatch) then pad to rowW
+		// using chromeBg so light-theme rows don't have a dark strip on the right.
+		inner := cursor + activeMark + "  " + swatch
+		innerW := lipgloss.Width(inner)
+		pad := rowW - innerW
+		if pad < 0 {
+			pad = 0
+		}
+		sb.WriteString(inner + s.chromeBg.Render(strings.Repeat(" ", pad)) + "\n")
+	}
+
+	// Footer hint: pad to full width.
+	hint := fmt.Sprintf("  %d themes  •  ● = active", len(builtinThemes))
+	hintRendered := s.system.Render(hint)
+	hintPad := m.width - lipgloss.Width(hintRendered)
+	if hintPad < 0 {
+		hintPad = 0
+	}
+	sb.WriteString("\n")
+	sb.WriteString(hintRendered + s.chromeBg.Render(strings.Repeat(" ", hintPad)))
+	return sb.String()
+}
 
 func (m chatModel) View() string {
 	if !m.ready {
-		return "\n  Initializing…"
+		return "\n  Initializing\u2026"
 	}
 	s := m.styles()
+	// Apply the theme's background fill to the viewport (no-op for dark themes).
+	m.viewport.Style = s.viewBg
+
 	if m.settingsMode {
 		return lipgloss.JoinVertical(lipgloss.Left,
 			m.headerView(s),
@@ -946,13 +1087,27 @@ func (m chatModel) View() string {
 			m.settingsFooter(s),
 		)
 	}
-	return lipgloss.JoinVertical(lipgloss.Left,
-		m.headerView(s),
-		m.viewport.View(),
-		m.slashMenuViewIfVisible(s),
-		m.inputView(s),
-		m.footerView(s),
-	)
+	if m.modelPickerMode {
+		return lipgloss.JoinVertical(lipgloss.Left,
+			m.headerView(s),
+			m.viewport.View(),
+			m.footerView(s),
+		)
+	}
+	if m.themePickerMode {
+		return lipgloss.JoinVertical(lipgloss.Left,
+			m.headerView(s),
+			m.viewport.View(),
+			m.footerView(s),
+		)
+	}
+	slashMenu := m.slashMenuViewIfVisible(s)
+	parts := []string{m.headerView(s), m.viewport.View()}
+	if slashMenu != "" {
+		parts = append(parts, slashMenu)
+	}
+	parts = append(parts, m.inputView(s), m.footerView(s))
+	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }
 
 // ── Sub-views ─────────────────────────────────────────────────────────────────
@@ -989,11 +1144,24 @@ func (m chatModel) slashMenuViewIfVisible(s styledSet) string {
 }
 
 func (m chatModel) inputView(s styledSet) string {
-	sep := s.sep.Render(strings.Repeat("─", m.width))
-	return sep + "\n" + m.textInput.View()
+	// Wrap the textarea in a rounded border box colored with the accent color.
+	// Width is set to fill the terminal; the textarea was already sized to
+	// leave room for the 4-char box overhead (2 borders + 2 padding).
+	box := s.inputBox.Width(m.width - 2).Render(m.textInput.View())
+	return box
 }
 
 func (m chatModel) footerView(s styledSet) string {
+	p := builtinThemes[m.themeIdx]
+	// bg applies the theme body background to any inline style, ensuring no
+	// dark cells appear on light themes.  No-op for dark themes (p.bg == "").
+	bg := func(st lipgloss.Style) lipgloss.Style {
+		if p.bg == lipgloss.Color("") {
+			return st
+		}
+		return st.Background(p.bg)
+	}
+
 	// ── Character counter (right side, first line) ───────────────────────
 	charCount := len([]rune(m.textInput.Value()))
 	limit := m.textInput.CharLimit
@@ -1004,9 +1172,9 @@ func (m chatModel) footerView(s styledSet) string {
 		ratio := float64(charCount) / float64(limit)
 		switch {
 		case ratio >= 1.0:
-			counterStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("196"))
+			counterStyle = bg(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("196")))
 		case ratio >= 0.9:
-			counterStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("220"))
+			counterStyle = bg(lipgloss.NewStyle().Foreground(lipgloss.Color("220")))
 		default:
 			counterStyle = s.system
 		}
@@ -1016,8 +1184,7 @@ func (m chatModel) footerView(s styledSet) string {
 	counter := counterStyle.Render(counterStr)
 	counterW := lipgloss.Width(counter)
 
-	// ── Hint text (left side, first line) ────────────────────────────────
-	// ── Scroll indicator (right side, inline with hint) ──────────────────
+	// ── Scroll indicator ──────────────────────────────────────────────────
 	var scrollIndicator string
 	if !m.viewport.AtBottom() {
 		pct := 0
@@ -1027,11 +1194,10 @@ func (m chatModel) footerView(s styledSet) string {
 		scrollIndicator = fmt.Sprintf(" ▼ %d%%", pct)
 	}
 	scrollW := lipgloss.Width(scrollIndicator)
-	scrollRendered := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("#f9e2af")).
+	scrollRendered := bg(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#f9e2af"))).
 		Render(scrollIndicator)
 
+	// ── Hint text ─────────────────────────────────────────────────────────
 	var hint string
 	switch {
 	case m.statusMsg != "":
@@ -1049,8 +1215,7 @@ func (m chatModel) footerView(s styledSet) string {
 
 	var hintRendered string
 	if m.loading && m.statusMsg == "" {
-		// Preserve the spinner's own colour; don't overlay the help style.
-		hintRendered = lipgloss.NewStyle().Width(hintW).MaxWidth(hintW).Render(hint)
+		hintRendered = bg(lipgloss.NewStyle()).Width(hintW).MaxWidth(hintW).Render(hint)
 	} else {
 		hintRendered = s.help.Width(hintW).MaxWidth(hintW).Render(hint)
 	}
@@ -1058,19 +1223,22 @@ func (m chatModel) footerView(s styledSet) string {
 	line1 := hintRendered + scrollRendered + counter
 
 	// ── Provider / model + token usage (second line) ─────────────────────
-	var tokenInfo string
+	displayName := m.displayModelName()
+	var line2 string
 	if m.totalPromptTokens > 0 || m.totalCandidateTokens > 0 {
-		tokenInfo = fmt.Sprintf(
-			" %s  •  tokens  in: %d  out: %d  total: %d",
-			m.modelName,
-			m.totalPromptTokens,
-			m.totalCandidateTokens,
-			m.totalPromptTokens+m.totalCandidateTokens,
-		)
+		total := m.totalPromptTokens + m.totalCandidateTokens
+		line2 = s.providerName.Render(" "+displayName) +
+			s.system.Render("  •  tokens ") +
+			s.system.Render("in: ") + s.tokenIn.Render(fmt.Sprintf("%d", m.totalPromptTokens)) +
+			s.system.Render("  out: ") + s.tokenOut.Render(fmt.Sprintf("%d", m.totalCandidateTokens)) +
+			s.system.Render("  total: ") + s.tokenTotal.Render(fmt.Sprintf("%d", total))
 	} else {
-		tokenInfo = fmt.Sprintf(" %s  •  tokens  —", m.modelName)
+		line2 = s.providerName.Render(" "+displayName) + s.system.Render("  •  tokens —")
 	}
-	line2 := s.system.Width(m.width).MaxWidth(m.width).Render(tokenInfo)
+
+	// Pad both lines to full terminal width so no dark strip appears on light themes.
+	line1 = s.chromeBg.Width(m.width).Render(line1)
+	line2 = s.chromeBg.Width(m.width).Render(line2)
 
 	return line1 + "\n" + line2
 }
@@ -1100,17 +1268,88 @@ func (m chatModel) settingsFooter(s styledSet) string {
 //   - Help overlay  → always GotoBottom (content is short)
 //   - Loading/streaming → GotoBottom so new chunks stream into view
 //   - After a completed agent reply → scrollToLastMessage so the START of the
+// setViewportContent fills every line to m.width with the theme background
+// before handing content to the viewport.  This is required because the
+// viewport's internal lipgloss.NewStyle().Width(contentWidth).Render() pads
+// short lines with spaces that carry no background colour — so on light themes
+// those cells expose terminal-default (black).  By pre-filling here we ensure
+// every stored line is already full-width with the correct bg.
+func (m *chatModel) setViewportContent(s styledSet, content string) {
+	m.viewport.SetContent(fillLines(content, m.width, s.chromeBg))
+}
+
+
+// field via reflect+unsafe and sets its Style.  This is the only way to paint
+// the textarea interior cells with the theme background; all other approaches
+// (Base.Width, CursorLine.Background) fail because Inline(true) strips bg.
+// The field layout is stable across bubbles v1.x.
+func setTextareaViewportStyle(ta *textarea.Model, style lipgloss.Style) {
+	rv := reflect.ValueOf(ta).Elem()
+	vField := rv.FieldByName("viewport")
+	if !vField.IsValid() || vField.IsNil() {
+		return
+	}
+	// vField is *viewport.Model (unexported ptr).  Make it addressable.
+	vp := (*viewport.Model)(unsafe.Pointer(vField.Pointer()))
+	vp.Style = style
+}
+
+// applyThemeToTextarea updates the textarea's internal style fields to match
+// the current palette.  For light themes (explicit bg) we set Base.Background
+// so the entire textarea block fills with the theme colour — Base is the only
+// style that is NOT stripped by Inline(true) in the computed sub-styles.
+// For dark themes we clear Base background so the terminal default shows through.
+//
+// We also set CursorLine, EndOfBuffer, Placeholder and Text foreground colours
+// so text is readable on every theme.
+func (m *chatModel) applyThemeToTextarea() {
+	p := builtinThemes[m.themeIdx]
+
+	if p.bg != lipgloss.Color("") {
+		// Light theme: set Base background + paint the internal viewport with
+		// the same bg so every cell (including right-side trailing space) is
+		// filled.  Base.Width is NOT set — we rely on the viewport Style instead.
+		baseBg := lipgloss.NewStyle().Background(p.bg)
+		m.textInput.FocusedStyle.Base = baseBg
+		m.textInput.BlurredStyle.Base = baseBg
+		// Internal viewport: paints trailing cells on each line with p.bg.
+		setTextareaViewportStyle(&m.textInput, lipgloss.NewStyle().Background(p.bg))
+		// EndOfBuffer tilde: fg only (inline anyway).
+		m.textInput.FocusedStyle.EndOfBuffer = lipgloss.NewStyle().Foreground(p.system)
+		m.textInput.BlurredStyle.EndOfBuffer = lipgloss.NewStyle().Foreground(p.system)
+		// CursorLine: clear (Inline strips bg; viewport Style handles fill).
+		m.textInput.FocusedStyle.CursorLine = lipgloss.NewStyle()
+		m.textInput.BlurredStyle.CursorLine = lipgloss.NewStyle()
+	} else {
+		// Dark theme: transparent — use terminal default.
+		m.textInput.FocusedStyle.Base = lipgloss.NewStyle()
+		m.textInput.BlurredStyle.Base = lipgloss.NewStyle()
+		setTextareaViewportStyle(&m.textInput, lipgloss.NewStyle())
+		m.textInput.FocusedStyle.CursorLine = lipgloss.NewStyle()
+		m.textInput.BlurredStyle.CursorLine = lipgloss.NewStyle()
+		m.textInput.FocusedStyle.EndOfBuffer = lipgloss.NewStyle()
+		m.textInput.BlurredStyle.EndOfBuffer = lipgloss.NewStyle()
+	}
+
+	// Set foreground colours so text is readable regardless of theme.
+	textFg := lipgloss.NewStyle().Foreground(p.text)
+	phFg := lipgloss.NewStyle().Foreground(p.system)
+	m.textInput.FocusedStyle.Text = textFg
+	m.textInput.BlurredStyle.Text = textFg
+	m.textInput.FocusedStyle.Placeholder = phFg
+	m.textInput.BlurredStyle.Placeholder = phFg
+}
+
 //     reply is visible; the user can scroll down to read code blocks below
 //   - Everything else (user msg, error, system) → GotoBottom
 func (m *chatModel) refreshViewport() {
 	s := m.styles()
 	if m.showHelp {
-		m.viewport.SetContent(m.helpView(s))
+		m.setViewportContent(s, m.helpView(s))
 		m.viewport.GotoBottom()
 		return
 	}
-	content := m.renderMessages(s)
-	m.viewport.SetContent(content)
+	m.setViewportContent(s, m.renderMessages(s))
 	m.viewport.GotoBottom()
 }
 
@@ -1146,8 +1385,7 @@ func (m *chatModel) refreshViewportShowLast() {
 
 	if lastAgentIdx < 0 {
 		// No agent message yet — just go to bottom.
-		content := m.renderMessages(s)
-		m.viewport.SetContent(content)
+		m.setViewportContent(s, m.renderMessages(s))
 		m.viewport.GotoBottom()
 		return
 	}
@@ -1162,17 +1400,17 @@ func (m *chatModel) refreshViewportShowLast() {
 		}
 		switch msg.role {
 		case "user":
-			before.WriteString(labelLine(s.userLabel, s.system, "You", msg.at, contentW))
-			before.WriteString(s.userText.PaddingLeft(2).Width(contentW).Render(msg.text) + "\n")
+			before.WriteString(labelLine(s.userLabel, s.system, s.chromeBg, "You", msg.at, w))
+			before.WriteString(s.userText.PaddingLeft(2).Width(w).Render(msg.text) + "\n")
 		case "agent":
-			before.WriteString(labelLine(s.agentLabel, s.system, "Agent", msg.at, contentW))
+			before.WriteString(labelLine(s.agentLabel, s.system, s.chromeBg, "Agent", msg.at, w))
 			before.WriteString(renderMarkdown(s, msg.text, contentW, s.agentText))
 		case "error":
-			before.WriteString(labelLine(s.errorLabel, s.system, "Error", msg.at, contentW))
+			before.WriteString(labelLine(s.errorLabel, s.system, s.chromeBg, "Error", msg.at, w))
 			wrapped := hardWrapText(msg.text, contentW-2)
-			before.WriteString(s.errorText.PaddingLeft(2).Render(wrapped) + "\n")
+			before.WriteString(s.errorText.PaddingLeft(2).Width(w).Render(wrapped) + "\n")
 		case "system":
-			before.WriteString(s.system.PaddingLeft(2).Width(contentW).Render(msg.text) + "\n")
+			before.WriteString(s.system.PaddingLeft(2).Width(w).Render(msg.text) + "\n")
 		}
 	}
 
@@ -1186,13 +1424,13 @@ func (m *chatModel) refreshViewportShowLast() {
 	// Render the last agent reply to measure its height.
 	lastMsg := m.msgs[lastAgentIdx]
 	var lastBlock strings.Builder
-	lastBlock.WriteString(labelLine(s.agentLabel, s.system, "Agent", lastMsg.at, contentW))
+	lastBlock.WriteString(labelLine(s.agentLabel, s.system, s.chromeBg, "Agent", lastMsg.at, w))
 	lastBlock.WriteString(renderMarkdown(s, lastMsg.text, contentW, s.agentText))
 	lastH := strings.Count(lastBlock.String(), "\n") + 1
 
 	// Full content for SetContent.
 	full := m.renderMessages(s)
-	m.viewport.SetContent(full)
+	m.setViewportContent(s, full)
 
 	if lastH <= m.viewport.Height {
 		// Short reply fits: scroll to bottom so no dead space below.
@@ -1213,13 +1451,13 @@ func (m chatModel) helpView(s styledSet) string {
 	bindings := [][2]string{
 		{"enter", "Send message"},
 		{"/settings", "Open settings overlay (theme, char limit)"},
+		{"/model", "Switch model or provider (2-level picker)"},
 		{"/help", "Toggle this help overlay"},
 		{"/clear", "Clear conversation history"},
 		{"/theme", "Cycle colour theme"},
 		{"/skills", "List available agent skills"},
 		{"↑ / ↓", "Browse sent message history"},
 		{"? / esc", "Toggle help (when input empty)"},
-		{"t", "Cycle colour theme (when input empty)"},
 		{"ctrl+l", "Clear conversation history"},
 		{"ctrl+s", "Save conversation → ~/.go-adk-q/session.json"},
 		{"ctrl+y", "Copy last agent reply to clipboard"},
@@ -1251,7 +1489,7 @@ func (m chatModel) helpView(s styledSet) string {
 			Render(marker + " " + t.name)
 	}
 	sb.WriteString("  " + strings.Join(badges, "  ") + "\n\n")
-	sb.WriteString(s.system.Render("  Press t to cycle  •  /theme  •  /settings for full settings  •  /help or esc to close") + "\n")
+	sb.WriteString(s.system.Render("  /theme to cycle  •  /settings for full settings  •  /help or esc to close") + "\n")
 
 	return sb.String()
 }
@@ -1280,7 +1518,7 @@ func (m chatModel) renderMessages(s styledSet) string {
 	contentW := w - 4 // leave glamour room for its 2-col left margin
 
 	if len(m.msgs) == 0 && !m.loading {
-		return s.system.Render("  No messages yet.")
+		return s.system.Width(w).Render("  No messages yet.")
 	}
 
 	var sb strings.Builder
@@ -1291,22 +1529,22 @@ func (m chatModel) renderMessages(s styledSet) string {
 		}
 		switch msg.role {
 		case "user":
-			sb.WriteString(labelLine(s.userLabel, s.system, "You", msg.at, contentW))
-			sb.WriteString(s.userText.PaddingLeft(2).Width(contentW).Render(msg.text) + "\n")
+			sb.WriteString(labelLine(s.userLabel, s.system, s.chromeBg, "You", msg.at, w))
+			sb.WriteString(s.userText.PaddingLeft(2).Width(w).Render(msg.text) + "\n")
 
 		case "agent":
-			sb.WriteString(labelLine(s.agentLabel, s.system, "Agent", msg.at, contentW))
+			sb.WriteString(labelLine(s.agentLabel, s.system, s.chromeBg, "Agent", msg.at, w))
 			sb.WriteString(renderMarkdown(s, msg.text, contentW, s.agentText))
 
 		case "error":
-			sb.WriteString(labelLine(s.errorLabel, s.system, "Error", msg.at, contentW))
+			sb.WriteString(labelLine(s.errorLabel, s.system, s.chromeBg, "Error", msg.at, w))
 			// Hard-wrap before rendering: error messages contain URLs and JSON
 			// with no spaces, which lipgloss's word-wrap can't break.
 			wrapped := hardWrapText(msg.text, contentW-2)
-			sb.WriteString(s.errorText.PaddingLeft(2).Render(wrapped) + "\n")
+			sb.WriteString(s.errorText.PaddingLeft(2).Width(w).Render(wrapped) + "\n")
 
 		case "system":
-			sb.WriteString(s.system.PaddingLeft(2).Width(contentW).Render(msg.text) + "\n")
+			sb.WriteString(s.system.PaddingLeft(2).Width(w).Render(msg.text) + "\n")
 		}
 	}
 
@@ -1317,11 +1555,11 @@ func (m chatModel) renderMessages(s styledSet) string {
 		}
 		if m.streamingText != "" {
 			// Show partial text as it arrives (streaming).
-			sb.WriteString(labelLine(s.agentLabel, s.system, "Agent", time.Time{}, contentW))
+			sb.WriteString(labelLine(s.agentLabel, s.system, s.chromeBg, "Agent", time.Time{}, w))
 			sb.WriteString(renderMarkdown(s, m.streamingText, contentW, s.agentText))
 		} else {
 			// No text yet — show the spinner.
-			sb.WriteString(s.loading.Render("  " + m.spinner.View() + " Thinking…") + "\n")
+			sb.WriteString(s.loading.Width(w).Render("  " + m.spinner.View() + " Thinking…") + "\n")
 		}
 	}
 
@@ -1329,6 +1567,26 @@ func (m chatModel) renderMessages(s styledSet) string {
 }
 
 // ── Agent streaming ───────────────────────────────────────────────────────────
+
+// switchModelCmd creates a tea.Cmd that calls newModelForEntry in a background
+// goroutine and delivers a switchModelMsg when done.  This keeps model
+// creation (which may involve network probing) off the UI thread.
+// sessionSvc and memorySvc are captured from the running chatModel so the
+// new runner reuses the same in-memory session history.
+func switchModelCmd(providerID, modelID string, sessionSvc session.Service, memorySvc memory.Service) tea.Cmd {
+	return func() tea.Msg {
+		ctx := context.Background()
+		llm, err := newModelForEntry(ctx, providerID, modelID)
+		if err != nil {
+			return switchModelMsg{err: err}
+		}
+		r, err := rebuildRunnerWithModel(ctx, llm, sessionSvc, memorySvc)
+		if err != nil {
+			return switchModelMsg{err: fmt.Errorf("rebuild runner: %w", err)}
+		}
+		return switchModelMsg{newRunner: r, newModelName: llm.Name()}
+	}
+}
 //
 // Architecture:
 //  1. startAgentStream launches a goroutine that runs the ADK iterator and
@@ -1464,11 +1722,324 @@ func runChat(r *runner.Runner, svc session.Service, memorySvc memory.Service, mo
 		defer lf.Close()
 	}
 
-	m := newChatModel(r, svc, memorySvc, modelName)
+	// Derive active provider IDs from the failover chain name string so the
+	// /model picker only shows providers that are actually configured.
+	// modelName is typically "failover(github-models → groq)" or just "github-models".
+	activeProviderIDs := parseProviderIDs(modelName)
+
+	m := newChatModel(r, svc, memorySvc, modelName, activeProviderIDs)
 	p := tea.NewProgram(m,
 		tea.WithAltScreen(),
 		tea.WithMouseCellMotion(),
+		tea.WithReportFocus(), // sends FocusMsg/BlurMsg when terminal tab gains/loses focus
 	)
 	_, err := p.Run()
 	return err
+}
+
+// parseProviderIDs extracts provider name substrings from a failover chain
+// model name string.
+//
+// Examples:
+//
+//	"github-models"                           → ["github-models"]
+//	"failover(github-models → groq → nvidia)" → ["github-models", "groq", "nvidia"]
+func parseProviderIDs(modelName string) []string {
+	// Strip outer "failover(...)" wrapper if present.
+	s := modelName
+	if idx := strings.Index(s, "("); idx >= 0 {
+		s = s[idx+1:]
+		if end := strings.LastIndex(s, ")"); end >= 0 {
+			s = s[:end]
+		}
+	}
+	// Split on " → " (en-dash arrow used by failover.Name()).
+	parts := strings.Split(s, " → ")
+	var ids []string
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			ids = append(ids, p)
+		}
+	}
+	if len(ids) == 0 {
+		ids = []string{modelName}
+	}
+	return ids
+}
+
+// handleKey processes tea.KeyMsg events. It is called from Update after
+// re-focusing the textarea if needed.
+func (m chatModel) handleKey(msg tea.KeyMsg) (chatModel, tea.Cmd) {
+	var cmds []tea.Cmd
+	switch msg.String() {
+
+	// ── ctrl+c: quit ──────────────────────────────────────────────
+	case "ctrl+c":
+		return m, tea.Quit
+
+	// ── esc: dismiss help overlay ─────────────────────────────────
+	case "esc":
+		// Close slash menu if open.
+		if slashMenuVisible(m.textInput.Value()) {
+			m.textInput.Reset()
+			m.slashMenuIdx = 0
+			return m, nil
+		}
+		if m.showHelp {
+			m.showHelp = false
+			m.refreshViewport()
+			return m, nil
+		}
+
+	// ── ctrl+l: clear history ─────────────────────────────────────
+	case "ctrl+l":
+		m.msgs = []chatMsg{{
+			role: "system",
+			text: "Session started",
+			at:   time.Now(),
+		}}
+		m.streamingText = ""
+		m.showHelp = false
+		m.refreshViewport()
+		return m, nil
+
+	// ── ctrl+t: toggle mouse on/off for scroll vs copy ───────────
+	case "ctrl+t":
+		m.mouseEnabled = !m.mouseEnabled
+		if m.mouseEnabled {
+			m.statusMsg = "Scroll mode — touchpad scrolls"
+			return m, tea.Batch(
+				oneShotTimer(2*time.Second, statusClearMsg{}),
+				func() tea.Msg { return tea.EnableMouseCellMotion() },
+			)
+		}
+		m.statusMsg = "Copy mode — select text freely  (ctrl+t to scroll)"
+		return m, tea.Batch(
+			oneShotTimer(3*time.Second, statusClearMsg{}),
+			func() tea.Msg { return tea.DisableMouse() },
+		)
+
+	// ── ctrl+s: save session ──────────────────────────────────────
+	case "ctrl+s":
+		if !m.loading {
+			path, err := saveSession(m.msgs)
+			if err != nil {
+				m.statusMsg = "Save failed: " + err.Error()
+			} else {
+				m.statusMsg = "Saved → " + path
+			}
+			cmds = append(cmds, oneShotTimer(3*time.Second, statusClearMsg{}))
+			m.refreshViewport()
+		}
+		return m, tea.Batch(cmds...)
+
+	// ── ctrl+y: copy last agent reply ─────────────────────────────
+	case "ctrl+y":
+		for i := len(m.msgs) - 1; i >= 0; i-- {
+			if m.msgs[i].role == "agent" {
+				content, label := smartCopy(m.msgs[i].text)
+				if err := copyToClipboard(content); err != nil {
+					m.statusMsg = "Copy failed: " + err.Error()
+				} else {
+					m.statusMsg = label
+				}
+				cmds = append(cmds, oneShotTimer(2*time.Second, statusClearMsg{}))
+				m.refreshViewport()
+				return m, tea.Batch(cmds...)
+			}
+		}
+
+	// ── ?: toggle help overlay ────────────────────────────────────
+	case "?":
+		// Only when the input box is empty so '?' is not typed into it.
+		if m.textInput.Value() == "" {
+			m.showHelp = !m.showHelp
+			m.refreshViewport()
+			return m, nil
+		}
+
+	// ── ↑: slash menu navigation OR input history ─────────────────
+	case "up":
+		val := m.textInput.Value()
+		if slashMenuVisible(val) {
+			if m.slashMenuIdx > 0 {
+				m.slashMenuIdx--
+			}
+			return m, nil
+		}
+		// History navigation only when the input box is empty.
+		if !m.loading && len(m.inputHistory) > 0 && val == "" {
+			if m.historyIdx == -1 {
+				m.inputDraft = ""
+				m.historyIdx = len(m.inputHistory) - 1
+			} else if m.historyIdx > 0 {
+				m.historyIdx--
+			}
+			m.textInput.SetValue(m.inputHistory[m.historyIdx])
+			m.textInput.CursorEnd()
+			if m.width > 6 {
+				m.textInput.SetHeight(calcInputHeight(m.textInput.Value(), m.width-6, 5))
+			}
+			return m, nil
+		}
+		// Non-empty input or no history → fall through to textarea.
+
+	// ── ↓: slash menu navigation OR input history ────────────────
+	case "down":
+		val := m.textInput.Value()
+		if slashMenuVisible(val) {
+			matches := slashMatches(val)
+			if m.slashMenuIdx < len(matches)-1 {
+				m.slashMenuIdx++
+			}
+			return m, nil
+		}
+		if m.historyIdx != -1 {
+			if m.historyIdx < len(m.inputHistory)-1 {
+				m.historyIdx++
+				m.textInput.SetValue(m.inputHistory[m.historyIdx])
+			} else {
+				m.historyIdx = -1
+				m.textInput.SetValue(m.inputDraft)
+				m.inputDraft = ""
+			}
+			m.textInput.CursorEnd()
+			if m.width > 6 {
+				m.textInput.SetHeight(calcInputHeight(m.textInput.Value(), m.width-6, 5))
+			}
+			return m, nil
+		}
+		// Not browsing → fall through to textarea.
+
+	// ── tab: complete slash command ───────────────────────────────
+	case "tab":
+		val := m.textInput.Value()
+		if slashMenuVisible(val) {
+			matches := slashMatches(val)
+			idx := m.slashMenuIdx
+			if idx >= len(matches) {
+				idx = 0
+			}
+			m.textInput.SetValue(matches[idx].name)
+			m.textInput.CursorEnd()
+			m.slashMenuIdx = 0
+			return m, nil
+		}
+
+	// ── enter: send message or execute slash command ─────────────
+	case "enter":
+		if m.loading {
+			break
+		}
+
+		// If the slash menu is open, resolve the selection first.
+		val := m.textInput.Value()
+		if slashMenuVisible(val) {
+			matches := slashMatches(val)
+			if len(matches) > 1 {
+				idx := m.slashMenuIdx
+				if idx >= len(matches) {
+					idx = 0
+				}
+				m.textInput.SetValue(matches[idx].name)
+				m.textInput.CursorEnd()
+				m.slashMenuIdx = 0
+				return m, nil
+			}
+			if len(matches) == 1 {
+				m.textInput.SetValue(matches[0].name)
+				m.textInput.CursorEnd()
+			}
+		}
+
+		input := strings.TrimSpace(m.textInput.Value())
+		if input == "" {
+			break
+		}
+		m.slashMenuIdx = 0
+
+		// ── Slash commands ─────────────────────────────────────────
+		switch strings.ToLower(input) {
+		case "/settings":
+			m.textInput.Reset()
+			m.settingsThemeIdx = m.themeIdx
+			m.settingsCharLimit = m.textInput.CharLimit
+			m.settingsForm = buildSettingsForm(&m.settingsThemeIdx, &m.settingsCharLimit).
+				WithWidth(m.width - 4)
+			m.settingsMode = true
+			return m, m.settingsForm.Init()
+
+		case "/help":
+			m.textInput.Reset()
+			m.showHelp = !m.showHelp
+			m.refreshViewport()
+			return m, nil
+
+		case "/clear":
+			m.textInput.Reset()
+			m.msgs = []chatMsg{{
+				role: "system",
+				text: "Session started",
+				at:   time.Now(),
+			}}
+			m.streamingText = ""
+			m.showHelp = false
+			m.refreshViewport()
+			return m, nil
+
+		case "/theme":
+			m.textInput.Reset()
+			m.themePickerIdx = m.themeIdx // pre-select current theme
+			m.themePickerMode = true
+			m.refreshViewportThemePicker()
+			return m, nil
+
+		case "/skills":
+			m.textInput.Reset()
+			m.showHelp = false
+			m.msgs = append(m.msgs, chatMsg{
+				role: "system",
+				text: listSkillsSummary(),
+				at:   time.Now(),
+			})
+			m.refreshViewport()
+			return m, nil
+
+		case "/model":
+			m.textInput.Reset()
+			m.showHelp = false
+			m.modelPicker = newModelPickerState(m.activeProviderIDs, m.modelName)
+			m.modelPickerMode = true
+			m.refreshViewportModelPicker()
+			return m, nil
+		}
+
+		// Not a slash command — send to agent.
+		m.showHelp = false
+		if len(m.inputHistory) == 0 || m.inputHistory[len(m.inputHistory)-1] != input {
+			m.inputHistory = append(m.inputHistory, input)
+		}
+		m.historyIdx = -1
+		m.inputDraft = ""
+		m.msgs = append(m.msgs, chatMsg{role: "user", text: input, at: time.Now()})
+		m.textInput.Reset()
+		m.loading = true
+		m.refreshViewport()
+		cmds = append(cmds, m.spinner.Tick, m.startAgentStream(input))
+		return m, tea.Batch(cmds...)
+	}
+
+	// All other keys (printable chars, backspace, arrows when input non-empty,
+	// etc.) are forwarded to the textarea widget so typing works normally.
+	var tiCmd tea.Cmd
+	m.textInput, tiCmd = m.textInput.Update(msg)
+	cmds = append(cmds, tiCmd)
+
+	// Keep textarea height in sync with content.
+	if m.ready && m.width > 6 {
+		m.textInput.SetHeight(calcInputHeight(m.textInput.Value(), m.width-6, 5))
+	}
+
+	return m, tea.Batch(cmds...)
 }

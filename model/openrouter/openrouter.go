@@ -49,10 +49,55 @@ import (
 	"context"
 	"os"
 
+	"go-adk-q/model/catalog"
 	"go-adk-q/model/oaibridge"
 
 	"google.golang.org/adk/model"
 )
+
+// KnownModels is the curated catalog of models available via OpenRouter
+// (https://openrouter.ai/models).  The :free suffix indicates zero-cost
+// tier models; capacity may be limited.
+//
+// Add new entries here to make them available in the /model TUI picker.
+var KnownModels = catalog.ProviderCatalog{
+	Provider: "openrouter",
+	Label:    "OpenRouter",
+	Models: []catalog.ModelEntry{
+		// ── Default (free tier) ───────────────────────────────────────────
+		{ID: "meta-llama/llama-3.2-3b-instruct:free", Label: "Llama 3.2 3B (free)", Tags: []string{"free"}, Default: true},
+		// ── Meta LLaMA ────────────────────────────────────────────────────
+		{ID: "meta-llama/llama-3.3-70b-instruct", Label: "Llama 3.3 70B"},
+		{ID: "meta-llama/llama-3.3-70b-instruct:free", Label: "Llama 3.3 70B (free)", Tags: []string{"free"}},
+		// ── OpenAI ────────────────────────────────────────────────────────
+		{ID: "openai/gpt-4o", Label: "GPT-4o"},
+		{ID: "openai/gpt-4o-mini", Label: "GPT-4o mini", Tags: []string{"fast"}},
+		{ID: "openai/gpt-oss-120b:free", Label: "GPT-OSS 120B (free)", Tags: []string{"free"}},
+		{ID: "openai/gpt-oss-20b:free", Label: "GPT-OSS 20B (free)", Tags: []string{"free"}},
+		// ── Anthropic ─────────────────────────────────────────────────────
+		{ID: "anthropic/claude-3-5-sonnet", Label: "Claude 3.5 Sonnet"},
+		// ── Google ────────────────────────────────────────────────────────
+		{ID: "google/gemini-2.0-flash-001", Label: "Gemini 2.0 Flash", Tags: []string{"fast"}},
+		{ID: "google/gemma-4-31b-it:free", Label: "Gemma 4 31B (free)", Tags: []string{"free"}},
+		{ID: "google/gemma-4-26b-a4b-it:free", Label: "Gemma 4 26B MoE (free)", Tags: []string{"free"}},
+		// ── Mistral ───────────────────────────────────────────────────────
+		{ID: "mistralai/mistral-large-2411", Label: "Mistral Large 2411"},
+		// ── DeepSeek ──────────────────────────────────────────────────────
+		{ID: "deepseek/deepseek-r1", Label: "DeepSeek R1", Tags: []string{"reasoning"}},
+		// ── Qwen ──────────────────────────────────────────────────────────
+		{ID: "qwen/qwen3-coder:free", Label: "Qwen3 Coder (free)", Tags: []string{"free", "code"}},
+		{ID: "qwen/qwen3-next-80b-a3b-instruct:free", Label: "Qwen3 80B (free)", Tags: []string{"free"}},
+		// ── Liquid ────────────────────────────────────────────────────────
+		{ID: "liquid/lfm-2.5-1.2b-thinking:free", Label: "LFM 2.5 1.2B Thinking (free)", Tags: []string{"free"}},
+		{ID: "liquid/lfm-2.5-1.2b-instruct:free", Label: "LFM 2.5 1.2B (free)", Tags: []string{"free"}},
+		// ── NVIDIA ────────────────────────────────────────────────────────
+		{ID: "nvidia/nemotron-3-super-120b-a12b:free", Label: "Nemotron 120B (free)", Tags: []string{"free"}},
+		// ── Minimax ───────────────────────────────────────────────────────
+		{ID: "minimax/minimax-m2.5:free", Label: "MiniMax M2.5 (free)", Tags: []string{"free"}},
+		// ── NousResearch ──────────────────────────────────────────────────
+		{ID: "nousresearch/hermes-3-llama-3.1-405b:free", Label: "Hermes 3 405B (free)", Tags: []string{"free"}},
+	},
+}
 
 const (
 	// DefaultModel is Meta's LLaMA 3.3 70B Instruct model, routed through

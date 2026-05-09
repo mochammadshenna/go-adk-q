@@ -66,9 +66,25 @@ import (
 	"os"
 	"strings"
 
+	"go-adk-q/model/catalog"
 	"go-adk-q/model/oaibridge"
 	"google.golang.org/adk/model"
 )
+
+// KnownModels is the curated catalog of HuggingFace models that are confirmed
+// to support function calling via the serverless inference API.
+//
+// Add new entries here to make them available in the /model TUI picker.
+var KnownModels = catalog.ProviderCatalog{
+	Provider: "huggingface",
+	Label:    "HuggingFace",
+	Models: []catalog.ModelEntry{
+		{ID: "mistralai/Mistral-7B-Instruct-v0.3", Label: "Mistral 7B v0.3", Default: true},
+		{ID: "NousResearch/Hermes-2-Pro-Llama-3-8B", Label: "Hermes 2 Pro Llama 3 8B"},
+		{ID: "NousResearch/Hermes-2-Pro-Mistral-7B", Label: "Hermes 2 Pro Mistral 7B"},
+		{ID: "microsoft/Phi-3.5-mini-instruct", Label: "Phi-3.5 mini", Tags: []string{"fast"}},
+	},
+}
 
 const (
 	// DefaultModel is Mistral 7B Instruct v0.3, which reliably supports
