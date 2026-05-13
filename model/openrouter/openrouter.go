@@ -64,11 +64,11 @@ var KnownModels = catalog.ProviderCatalog{
 	Provider: "openrouter",
 	Label:    "OpenRouter",
 	Models: []catalog.ModelEntry{
-		// ── Default (free tier) ───────────────────────────────────────────
-		{ID: "meta-llama/llama-3.2-3b-instruct:free", Label: "Llama 3.2 3B (free)", Tags: []string{"free"}, Default: true},
+		// ── Default (free tier, supports tool use) ───────────────────────
+		{ID: "meta-llama/llama-3.3-70b-instruct:free", Label: "Llama 3.3 70B (free)", Tags: []string{"free"}, Default: true},
 		// ── Meta LLaMA ────────────────────────────────────────────────────
 		{ID: "meta-llama/llama-3.3-70b-instruct", Label: "Llama 3.3 70B"},
-		{ID: "meta-llama/llama-3.3-70b-instruct:free", Label: "Llama 3.3 70B (free)", Tags: []string{"free"}},
+		{ID: "meta-llama/llama-3.2-3b-instruct:free", Label: "Llama 3.2 3B (free, no tools)", Tags: []string{"free"}},
 		// ── OpenAI ────────────────────────────────────────────────────────
 		{ID: "openai/gpt-4o", Label: "GPT-4o"},
 		{ID: "openai/gpt-4o-mini", Label: "GPT-4o mini", Tags: []string{"fast"}},
@@ -100,11 +100,10 @@ var KnownModels = catalog.ProviderCatalog{
 }
 
 const (
-	// DefaultModel is Meta's LLaMA 3.3 70B Instruct model, routed through
-	// OpenRouter. It supports function calling and offers a good balance of
-	// quality, speed, and cost across most tasks.
-	// DefaultModel = "meta-llama/llama-3.3-70b-instruct"
-	DefaultModel = "google/gemma-4-31b-it:free"
+	// DefaultModel is Meta's LLaMA 3.3 70B Instruct (free tier) routed through
+	// OpenRouter. It supports function/tool calling and offers a good balance
+	// of quality and speed at zero cost.
+	DefaultModel = "meta-llama/llama-3.3-70b-instruct:free"
 
 	baseURL  = "https://openrouter.ai/api/v1"
 	provider = "openrouter"

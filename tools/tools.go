@@ -1,20 +1,16 @@
 // Package tools provides ADK FunctionTools for the go-adk-q demo agent.
 //
-// Each tool is a typed Go function wrapped by functiontool.New.
-// Args structs use `json` + `jsonschema` struct tags so that ADK auto-generates
-// the correct JSON schema that the LLM reads to decide when and how to call a tool.
-//
-// Pattern:
-//
-//	type myArgs struct {
-//	    Field string `json:"field" jsonschema:"Description for the LLM."`
-//	}
-//	func myFn(_ tool.Context, args myArgs) (ReturnType, error) { ... }
-//	tool, _ := functiontool.New(functiontool.Config{Name: "...", Description: "..."}, myFn)
+// Weather data: wttr.in (free, no API key, worldwide coverage).
+// Time data: wttr.in for lat/lon → timeapi.io for timezone + current time.
+// No hardcoded city maps. Any city name the LLM passes works.
 package tools
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -22,48 +18,90 @@ import (
 	"google.golang.org/adk/tool/functiontool"
 )
 
-// ── Weather Tool ─────────────────────────────────────────────────────────────
+var httpClient = &http.Client{Timeout: 10 * time.Second}
 
-// getWeatherArgs defines the required parameters for get_weather.
-// Fields without `json:",omitempty"` are required — the LLM must supply them.
+func getJSON(apiURL string, out any) error {
+	resp, err := httpClient.Get(apiURL)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(body, out)
+}
+
+// ── wttr.in response (shared by both tools) ───────────────────────────────────
+
+type wttrResponse struct {
+	NearestArea []struct {
+		Latitude  string `json:"latitude"`
+		Longitude string `json:"longitude"`
+	} `json:"nearest_area"`
+	CurrentCondition []struct {
+		TempC         string `json:"temp_C"`
+		FeelsLikeC    string `json:"FeelsLikeC"`
+		Humidity      string `json:"humidity"`
+		WindspeedKmph string `json:"windspeedKmph"`
+		WeatherDesc   []struct {
+			Value string `json:"value"`
+		} `json:"weatherDesc"`
+	} `json:"current_condition"`
+}
+
+func fetchWttr(city string) (*wttrResponse, error) {
+	var w wttrResponse
+	err := getJSON(fmt.Sprintf("https://wttr.in/%s?format=j1", url.PathEscape(city)), &w)
+	if err != nil {
+		return nil, fmt.Errorf("wttr.in fetch for %q: %w", city, err)
+	}
+	if len(w.CurrentCondition) == 0 {
+		return nil, fmt.Errorf("wttr.in returned no data for %q", city)
+	}
+	return &w, nil
+}
+
+// ── Weather Tool ──────────────────────────────────────────────────────────────
+
 type getWeatherArgs struct {
-	City string `json:"city" jsonschema:"The name of the city for which to retrieve the weather report."`
+	City string `json:"city" jsonschema:"The name of the city to get current weather for."`
 }
 
-// getWeatherResult is the structured return type. Returning a struct (not string)
-// gives the LLM richer, schema-typed data to reason about.
 type getWeatherResult struct {
-	City   string `json:"city"`
-	Status string `json:"status"`
-	Report string `json:"report"`
+	City        string `json:"city"`
+	Temperature string `json:"temperature"`
+	FeelsLike   string `json:"feels_like"`
+	Condition   string `json:"condition"`
+	Humidity    string `json:"humidity"`
+	WindSpeed   string `json:"wind_speed"`
 }
 
-// getWeather returns a simulated weather report.
-// In production, replace with a live weather API call (e.g., OpenWeatherMap).
-// The first parameter is tool.Context — use it to access session state or artifacts.
 func getWeather(_ tool.Context, args getWeatherArgs) (getWeatherResult, error) {
-	reports := map[string]string{
-		"new york":    "Cloudy, 18°C (64°F), humidity 72%, wind 15 km/h NW",
-		"london":      "Light rain, 12°C (54°F), humidity 85%, wind 20 km/h SW",
-		"tokyo":       "Sunny, 25°C (77°F), humidity 60%, wind 8 km/h E",
-		"sydney":      "Partly cloudy, 22°C (72°F), humidity 65%, wind 12 km/h NE",
-		"paris":       "Overcast, 15°C (59°F), humidity 78%, wind 10 km/h SE",
-		"san francisco": "Foggy, 16°C (61°F), humidity 90%, wind 18 km/h W",
+	w, err := fetchWttr(strings.TrimSpace(args.City))
+	if err != nil {
+		return getWeatherResult{}, err
 	}
-	city := strings.ToLower(strings.TrimSpace(args.City))
-	report, ok := reports[city]
-	if !ok {
-		report = fmt.Sprintf("Weather data for %q is not available in the simulation.", args.City)
+	c := w.CurrentCondition[0]
+	condition := ""
+	if len(c.WeatherDesc) > 0 {
+		condition = c.WeatherDesc[0].Value
 	}
-	return getWeatherResult{City: args.City, Status: "success", Report: report}, nil
+	return getWeatherResult{
+		City:        args.City,
+		Temperature: c.TempC + "°C",
+		FeelsLike:   c.FeelsLikeC + "°C",
+		Condition:   condition,
+		Humidity:    c.Humidity + "%",
+		WindSpeed:   c.WindspeedKmph + " km/h",
+	}, nil
 }
 
-// NewWeatherTool creates and returns the get_weather ADK FunctionTool.
-// Panics at startup (not at runtime) if construction fails — fail-fast pattern.
 func NewWeatherTool() tool.Tool {
 	t, err := functiontool.New(functiontool.Config{
 		Name:        "get_weather",
-		Description: "Retrieves the current weather report for a specified city.",
+		Description: "Returns the current real weather for any city worldwide.",
 	}, getWeather)
 	if err != nil {
 		panic(fmt.Sprintf("NewWeatherTool: %v", err))
@@ -73,67 +111,59 @@ func NewWeatherTool() tool.Tool {
 
 // ── Time Tool ─────────────────────────────────────────────────────────────────
 
-// getCurrentTimeArgs defines the required parameter for get_current_time.
 type getCurrentTimeArgs struct {
-	City string `json:"city" jsonschema:"The name of the city for which to retrieve the current local time."`
+	City string `json:"city" jsonschema:"The name of the city to get the current local time for."`
 }
 
-// getCurrentTimeResult is the structured return type for the time tool.
 type getCurrentTimeResult struct {
 	City     string `json:"city"`
 	DateTime string `json:"datetime"`
 	Timezone string `json:"timezone"`
 }
 
-// cityUTCOffset maps common cities to their UTC hour offset.
-// A real implementation should use the IANA timezone database.
-var cityUTCOffset = map[string]int{
-	"new york":      -5,
-	"los angeles":   -8,
-	"chicago":       -6,
-	"london":        0,
-	"paris":         1,
-	"berlin":        1,
-	"amsterdam":     1,
-	"tokyo":         9,
-	"seoul":         9,
-	"beijing":       8,
-	"singapore":     8,
-	"sydney":        10,
-	"dubai":         4,
-	"mumbai":        5,
-	"san francisco": -8,
+type timeAPIResponse struct {
+	DateTime string `json:"dateTime"`
+	TimeZone string `json:"timeZone"`
 }
 
-// getCurrentTime returns the simulated local time for a given city using a
-// fixed UTC offset. For production, use time.LoadLocation with the IANA DB.
 func getCurrentTime(_ tool.Context, args getCurrentTimeArgs) (getCurrentTimeResult, error) {
-	city := strings.ToLower(strings.TrimSpace(args.City))
-	offset, known := cityUTCOffset[city]
-	utcNow := time.Now().UTC()
+	// Step 1: get lat/lon from wttr.in — works for any city name worldwide.
+	w, err := fetchWttr(strings.TrimSpace(args.City))
+	if err != nil {
+		return getCurrentTimeResult{}, err
+	}
+	if len(w.NearestArea) == 0 {
+		return getCurrentTimeResult{}, fmt.Errorf("no coordinates found for %q", args.City)
+	}
+	lat := w.NearestArea[0].Latitude
+	lon := w.NearestArea[0].Longitude
 
-	var localTime time.Time
-	var tzLabel string
-	if known {
-		localTime = utcNow.Add(time.Duration(offset) * time.Hour)
-		tzLabel = fmt.Sprintf("UTC%+d", offset)
-	} else {
-		localTime = utcNow
-		tzLabel = "UTC (city offset unknown)"
+	// Step 2: resolve timezone + current time from coordinates via timeapi.io.
+	var tr timeAPIResponse
+	err = getJSON(fmt.Sprintf(
+		"https://timeapi.io/api/time/current/coordinate?latitude=%s&longitude=%s", lat, lon,
+	), &tr)
+	if err != nil || tr.DateTime == "" {
+		return getCurrentTimeResult{}, fmt.Errorf("time lookup failed for %q: %w", args.City, err)
+	}
+
+	// Parse and reformat.
+	t, err := time.Parse("2006-01-02T15:04:05.999999999", tr.DateTime)
+	if err != nil {
+		t, _ = time.Parse("2006-01-02T15:04:05", tr.DateTime)
 	}
 
 	return getCurrentTimeResult{
 		City:     args.City,
-		DateTime: localTime.Format("2006-01-02 15:04:05 MST"),
-		Timezone: tzLabel,
+		DateTime: t.Format("Monday, 02 Jan 2006 15:04:05"),
+		Timezone: tr.TimeZone,
 	}, nil
 }
 
-// NewTimeTool creates and returns the get_current_time ADK FunctionTool.
 func NewTimeTool() tool.Tool {
 	t, err := functiontool.New(functiontool.Config{
 		Name:        "get_current_time",
-		Description: "Returns the current local time in the specified city.",
+		Description: "Returns the current real local time for any city worldwide.",
 	}, getCurrentTime)
 	if err != nil {
 		panic(fmt.Sprintf("NewTimeTool: %v", err))

@@ -130,7 +130,7 @@ build-linux-amd64-cgo: check-zig ## Build main binary for linux/amd64 — CGO=1,
 	@mkdir -p $(BIN_DIR)
 	CC="zig cc -target $(ZIG_TARGET_AMD64)" \
 	CXX="zig c++ -target $(ZIG_TARGET_AMD64)" \
-	CGO_ENABLED=1 GOOS=linux GOARCH=amd64 \
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
 	  $(GO) build $(GOFLAGS) \
 	  -ldflags="-s -w" \
 	  -o $(BIN_DIR)/$(BINARY)-linux-amd64-cgo .
@@ -141,7 +141,7 @@ build-linux-arm64-cgo: check-zig ## Build main binary for linux/arm64 — CGO=1,
 	@mkdir -p $(BIN_DIR)
 	CC="zig cc -target $(ZIG_TARGET_ARM64)" \
 	CXX="zig c++ -target $(ZIG_TARGET_ARM64)" \
-	CGO_ENABLED=1 GOOS=linux GOARCH=arm64 \
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 \
 	  $(GO) build $(GOFLAGS) \
 	  -ldflags="-s -w" \
 	  -o $(BIN_DIR)/$(BINARY)-linux-arm64-cgo .
@@ -152,7 +152,7 @@ build-tui-linux-amd64-cgo: check-zig ## Build TUI binary for linux/amd64 — CGO
 	@mkdir -p $(BIN_DIR)
 	CC="zig cc -target $(ZIG_TARGET_AMD64)" \
 	CXX="zig c++ -target $(ZIG_TARGET_AMD64)" \
-	CGO_ENABLED=1 GOOS=linux GOARCH=amd64 \
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
 	  $(GO) build $(GOFLAGS) \
 	  -ldflags="-s -w" \
 	  -o $(BIN_DIR)/$(TUI_BINARY)-linux-amd64-cgo ./cmd/tui
@@ -185,8 +185,8 @@ cgo-info: ## Show CGO env, active CGO packages per platform, and available build
 	@printf "  %-16s %s\n" "CXX:"      "$$($(GO) env CXX)"
 	@printf "  %-16s %s\n" "Zig:"      "$$(zig version 2>/dev/null || echo '(not installed)')"
 	@echo ""
-	@echo "── CGO-active packages — linux/amd64 CGO_ENABLED=1 ─────────────────"
-	@GOOS=linux GOARCH=amd64 CGO_ENABLED=1 $(GO) list -deps \
+	@echo "── CGO-active packages — linux/amd64 CGO_ENABLED=0 ─────────────────"
+	@GOOS=linux GOARCH=amd64 CGO_ENABLED=0 $(GO) list -deps \
 	  -f '{{if .CgoFiles}}  {{.ImportPath}}{{end}}' $(PKG) 2>/dev/null | sort -u || true
 	@echo ""
 	@echo "── CGO-active packages — $$($(GO) env GOOS)/$$($(GO) env GOARCH) (current) ──────"

@@ -1,0 +1,2339 @@
+# go-adk-q — Full documentation
+
+---
+<!-- file: docs/README.md -->
+# go-adk-q Documentation
+
+**go-adk-q** is a minimal, idiomatic Go reference implementation built on the
+[Google ADK Go SDK](https://pkg.go.dev/google.golang.org/adk) (`v1.2.0`).
+It demonstrates every major ADK pattern — agents, tools, skills, memory,
+artifacts, multi-provider failover — packaged inside a Bubbletea TUI you can
+run today.
+
+---
+
+## Where to start
+
+| I want to… | Go to… |
+|---|---|
+| Run the TUI in 5 minutes | [tutorials/get-started.md](tutorials/get-started.md) |
+| Build my first custom agent | [tutorials/first-agent.md](tutorials/first-agent.md) |
+| Add a new LLM provider | [tutorials/add-provider.md](tutorials/add-provider.md) |
+| Add a colour theme | [how-to/add-theme.md](how-to/add-theme.md) |
+| Add an agent skill | [how-to/add-skill.md](how-to/add-skill.md) |
+| Debug a TUI rendering bug | [how-to/debug-tui.md](how-to/debug-tui.md) |
+| Look up CLI flags | [reference/cli.md](reference/cli.md) |
+| See all config env vars | [reference/config.md](reference/config.md) |
+| Browse provider APIs | [reference/providers.md](reference/providers.md) |
+| Understand the architecture | [explanation/architecture.md](explanation/architecture.md) |
+| Understand TUI rendering | [explanation/tui-rendering.md](explanation/tui-rendering.md) |
+| Understand failover design | [explanation/failover.md](explanation/failover.md) |
+| Read design decisions | [adr/](adr/) |
+
+---
+
+## Documentation structure
+
+This documentation follows the [Diataxis](https://diataxis.fr/) framework:
+
+```
+docs/
+├── README.md              ← you are here (navigation index)
+├── tutorials/             ← learning-oriented, step-by-step guides
+│   ├── get-started.md
+│   ├── first-agent.md
+│   └── add-provider.md
+├── how-to/                ← task-oriented, goal-directed recipes
+│   ├── add-theme.md
+│   ├── add-skill.md
+│   ├── add-provider.md
+│   └── debug-tui.md
+├── reference/             ← information-oriented, precise and complete
+│   ├── cli.md
+│   ├── config.md
+│   ├── api.md
+│   ├── themes.md
+│   └── providers.md
+├── explanation/           ← understanding-oriented, background and rationale
+│   ├── architecture.md
+│   ├── tui-rendering.md
+│   └── failover.md
+└── adr/                   ← Architecture Decision Records
+    ├── ADR-0001-adk-as-agent-layer.md
+    ├── ADR-0002-genkit-compat-oai.md
+    ├── ADR-0003-failover-buffered.md
+    ├── ADR-0004-lipgloss-join-vertical.md
+    └── ADR-0005-provider-config-pattern.md
+```
+
+---
+
+## Personas
+
+**Application developer** — You want to wire ADK agents into your own Go
+application. Start with [tutorials/first-agent.md](tutorials/first-agent.md)
+then read [explanation/architecture.md](explanation/architecture.md).
+
+**Provider integrator** — You want to add a new LLM backend. Start with
+[tutorials/add-provider.md](tutorials/add-provider.md) and use
+[reference/providers.md](reference/providers.md) as a checklist.
+
+**TUI contributor** — You want to fix a rendering bug or add a theme. Start
+with [explanation/tui-rendering.md](explanation/tui-rendering.md) and
+[how-to/debug-tui.md](how-to/debug-tui.md).
+
+**Agent-legible (LLM)** — See [../llms.txt](../llms.txt) for a compact index
+and [../llms-full.txt](../llms-full.txt) for full content.
+
+---
+
+## Quick reference
+
+```sh
+# Run the interactive TUI
+go run ./cmd/tui chat
+
+# One-shot query
+go run ./cmd/tui run "What is the capital of France?"
+
+# Build and run
+go build -o tui ./cmd/tui && ./tui chat
+
+# Run all tests
+go test ./...
+```
+
+Required environment variables (at least one provider key):
+
+```sh
+export GEMINI_API_KEY=...
+export GITHUB_TOKEN=...        # GitHub Models
+export GROQ_API_KEY=...
+export NVIDIA_API_KEY=...
+export OPENROUTER_API_KEY=...
+export HUGGINGFACE_API_KEY=...
+```
+
+See [reference/config.md](reference/config.md) for the full list.
+
+---
+<!-- file: docs/tutorials/get-started.md -->
+# Tutorial: Get started with go-adk-q
+
+**Goal:** Run the interactive TUI chat in under 5 minutes.
+
+**Prerequisites:**
+- Go 1.22+ installed (`go version`)
+- At least one LLM provider API key
+
+---
+
+## Step 1 — Clone the repository
+
+```sh
+git clone https://github.com/your-org/go-adk-q
+cd go-adk-q
+```
+
+## Step 2 — Set an API key
+
+The TUI tries providers in priority order; the first one with a valid key wins.
+Set whichever you have:
+
+```sh
+# Google Gemini (recommended for first run)
+export GEMINI_API_KEY=your_key_here
+
+# OR GitHub Models (free with a GitHub account)
+export GITHUB_TOKEN=your_token_here
+
+# OR Groq (free tier available)
+export GROQ_API_KEY=your_key_here
+```
+
+## Step 3 — Run the TUI
+
+```sh
+go run ./cmd/tui chat
+```
+
+The TUI starts in the default Catppuccin dark theme.
+
+## Step 4 — Send your first message
+
+Type a message and press **Enter** to send. The agent replies using your
+configured provider, with full Markdown rendering.
+
+## Step 5 — Try a slash command
+
+Type `/` to see the autocomplete menu:
+
+| Command | Action |
+|---|---|
+| `/theme` | Cycle through 8 colour themes |
+| `/model` | Open the model/provider picker |
+| `/settings` | Open settings (theme, character limit) |
+| `/skills` | List available agent skills |
+| `/help` | Toggle the help overlay |
+| `/clear` | Clear conversation history |
+
+## Step 6 — Try one-shot mode
+
+You can also send a single message and get the response printed to stdout:
+
+```sh
+go run ./cmd/tui run "Explain the ADK SequentialAgent pattern in one paragraph"
+```
+
+---
+
+## What just happened?
+
+When you type a message:
+
+1. The TUI passes it to an ADK `LlmAgent` via an ADK `Runner`.
+2. The `Runner` uses a `failover.Model` that tries providers left-to-right.
+3. The first provider that responds successfully is used; failures are logged.
+4. The response is streamed back and rendered as Markdown in the viewport.
+
+Session history is persisted across restarts via the ADK `InMemorySessionService`
+(or the file-backed variant if configured).
+
+---
+
+## Next steps
+
+- [Tutorial: Build your first custom agent](first-agent.md)
+- [Tutorial: Add a new LLM provider](add-provider.md)
+- [Reference: All config environment variables](../reference/config.md)
+
+---
+<!-- file: docs/tutorials/first-agent.md -->
+# Tutorial: Build your first custom agent
+
+**Goal:** Write a Go program that creates an ADK `LlmAgent`, gives it a custom
+tool, and runs it against a real LLM provider.
+
+**Prerequisites:**
+- Completed [get-started.md](get-started.md)
+- `GEMINI_API_KEY` or `GROQ_API_KEY` set in your environment
+
+---
+
+## Step 1 — Create a sample directory
+
+```sh
+mkdir -p sample/mytool && cd sample/mytool
+```
+
+## Step 2 — Write the tool
+
+ADK tools are typed Go functions annotated with `json` and `jsonschema` tags.
+Create `main.go`:
+
+```go
+package main
+
+import (
+    "context"
+    "encoding/json"
+    "fmt"
+    "log"
+    "os"
+
+    "google.golang.org/adk/agent/llmagent"
+    "google.golang.org/adk/runner"
+    "google.golang.org/adk/session"
+    "google.golang.org/adk/tool"
+    "google.golang.org/genai"
+
+    "go-adk-q/model/groq"
+)
+
+// wordCountArgs is the input schema for the wordCount tool.
+type wordCountArgs struct {
+    Text string `json:"text" jsonschema:"description=The text to count words in"`
+}
+
+// wordCount counts words in the provided text.
+func wordCount(_ context.Context, args wordCountArgs) (map[string]any, error) {
+    words := len(strings.Fields(args.Text))
+    return map[string]any{"word_count": words}, nil
+}
+
+func main() {
+    ctx := context.Background()
+
+    // Build a model using the provider Config pattern.
+    model, err := groq.NewModel(ctx, groq.ConfigFromEnv())
+    if err != nil {
+        log.Fatalf("model: %v", err)
+    }
+
+    // Wrap the Go function as an ADK FunctionTool.
+    wc, err := tool.NewFunctionTool(wordCount)
+    if err != nil {
+        log.Fatalf("tool: %v", err)
+    }
+
+    // Create the agent.
+    ag, err := llmagent.New(llmagent.Config{
+        Name:        "word-counter",
+        Model:       model,
+        Instruction: "You are a helpful assistant. Use the word_count tool when asked about word counts.",
+        Tools:       []tool.Tool{wc},
+    })
+    if err != nil {
+        log.Fatalf("agent: %v", err)
+    }
+
+    // Wire up ADK services and runner.
+    r, err := runner.New(runner.Config{
+        AppName:        "mytool",
+        Agent:          ag,
+        SessionService: session.NewInMemorySessionService(),
+    })
+    if err != nil {
+        log.Fatalf("runner: %v", err)
+    }
+
+    // Create a session and send a message.
+    sess, _ := r.SessionService().CreateSession(ctx, "mytool", "user1", nil)
+    msg := genai.NewUserContent(genai.Text("How many words are in 'the quick brown fox'?"))
+
+    for resp, err := range r.RunAsync(ctx, "user1", sess.ID, msg) {
+        if err != nil {
+            log.Fatalf("run: %v", err)
+        }
+        for _, part := range resp.Content.Parts {
+            if t, ok := part.(genai.Text); ok {
+                fmt.Print(string(t))
+            }
+        }
+    }
+    fmt.Println()
+}
+```
+
+## Step 3 — Run it
+
+```sh
+cd ../..          # back to repo root
+go run ./sample/mytool
+```
+
+You should see the agent call `wordCount` and report `4`.
+
+---
+
+## What you learned
+
+| Concept | Where |
+|---|---|
+| `tool.NewFunctionTool` | Wraps any typed Go func as an ADK tool |
+| `jsonschema` tags | Describe the tool's input schema to the LLM |
+| `llmagent.Config` | Declarative agent construction |
+| `runner.Config` | Wires agent, session, memory, artifact services |
+| `r.RunAsync` | Returns an iterator over `LLMResponse` events |
+
+---
+
+## Patterns demonstrated in this repo
+
+Look at `sample/` for more complete examples:
+
+| Sample | What it shows |
+|---|---|
+| `sample/groq/` | Groq provider usage |
+| `sample/openrouter/` | OpenRouter with model selection |
+| `sample/opencodezen/` | Multi-agent collaboration |
+
+And in `agents/`:
+
+| Agent | Pattern |
+|---|---|
+| `agents/llmauditor.go` | Custom `Run` func (not `LlmAgent`) |
+| `agents/collaboration/` | Multi-agent via `agenttool` |
+
+---
+
+## Next steps
+
+- [Tutorial: Add a new LLM provider](add-provider.md)
+- [Explanation: Architecture overview](../explanation/architecture.md)
+- [Reference: Full API reference](../reference/api.md)
+
+---
+<!-- file: docs/tutorials/add-provider.md -->
+# Tutorial: Add a new LLM provider
+
+**Goal:** Implement a new provider package that integrates with the ADK model
+interface, registers with the catalog, and appears in the TUI `/model` picker.
+
+**Prerequisites:**
+- Completed [get-started.md](get-started.md)
+- Familiarity with the existing providers in `model/`
+
+---
+
+## Step 1 — Understand the provider contract
+
+Every provider package in this repo exposes exactly three things:
+
+```go
+// Config holds all provider-specific settings.
+type Config struct {
+    APIKey  string
+    BaseURL string // optional; defaults to provider's public endpoint
+    Model   string // model ID; e.g. "llama-3.3-70b-versatile"
+}
+
+// ConfigFromEnv returns a Config populated from environment variables.
+func ConfigFromEnv() Config
+
+// NewModel constructs a model.LLM that satisfies the ADK interface.
+func NewModel(ctx context.Context, cfg Config) (model.LLM, error)
+```
+
+No positional arguments. No package-level globals other than `KnownModels`.
+
+## Step 2 — Create the package
+
+```sh
+mkdir model/myprovider
+```
+
+Create `model/myprovider/myprovider.go`:
+
+```go
+// Package myprovider integrates MyProvider's OpenAI-compatible API with the
+// ADK model.LLM interface via Genkit's compat_oai bridge.
+package myprovider
+
+import (
+    "context"
+    "fmt"
+    "os"
+
+    "go-adk-q/model/catalog"
+    "go-adk-q/model/oaibridge"
+)
+
+const (
+    defaultBaseURL = "https://api.myprovider.example/v1"
+    defaultModel   = "my-model-id"
+    envAPIKey      = "MYPROVIDER_API_KEY"
+    envModel       = "MYPROVIDER_MODEL"
+    envBaseURL     = "MYPROVIDER_BASE_URL"
+)
+
+// KnownModels is the static model catalog for this provider.
+// Register it in cmd/tui/main.go's init().
+var KnownModels = catalog.ProviderCatalog{
+    Provider: "myprovider",
+    Label:    "My Provider",
+    Models: []catalog.ModelEntry{
+        {ID: "my-model-id", Label: "My Model", Default: true},
+        {ID: "my-model-mini", Label: "My Model Mini", Tags: []string{"fast"}},
+    },
+}
+
+// Config holds all settings for the MyProvider backend.
+type Config struct {
+    APIKey  string
+    BaseURL string
+    Model   string
+}
+
+// ConfigFromEnv returns a Config populated from environment variables.
+// Falls back to defaults for BaseURL and Model if not set.
+func ConfigFromEnv() Config {
+    baseURL := os.Getenv(envBaseURL)
+    if baseURL == "" {
+        baseURL = defaultBaseURL
+    }
+    model := os.Getenv(envModel)
+    if model == "" {
+        model = defaultModel
+    }
+    return Config{
+        APIKey:  os.Getenv(envAPIKey),
+        BaseURL: baseURL,
+        Model:   model,
+    }
+}
+
+// NewModel constructs a model.LLM that calls MyProvider's OpenAI-compatible API.
+// Returns an error if APIKey is empty.
+func NewModel(ctx context.Context, cfg Config) (model.LLM, error) {
+    if cfg.APIKey == "" {
+        return nil, fmt.Errorf("myprovider: %s is not set", envAPIKey)
+    }
+    return oaibridge.New(ctx, oaibridge.Config{
+        APIKey:    cfg.APIKey,
+        BaseURL:   cfg.BaseURL,
+        ModelName: cfg.Model,
+    })
+}
+```
+
+## Step 3 — Register the catalog
+
+Open `cmd/tui/main.go` and add to `init()`:
+
+```go
+import "go-adk-q/model/myprovider"
+
+func init() {
+    // existing registrations ...
+    catalog.Register(myprovider.KnownModels)
+}
+```
+
+## Step 4 — Add to the failover chain
+
+In `buildRunner()` inside `cmd/tui/main.go`, add your provider as a fallback:
+
+```go
+myModel, _ := myprovider.NewModel(ctx, myprovider.ConfigFromEnv())
+
+chain := failover.New(primary, backup1, myModel)
+```
+
+Nil models (from missing API keys) are safely ignored by `failover.New`.
+
+## Step 5 — Test
+
+```sh
+export MYPROVIDER_API_KEY=your_key_here
+go build ./...
+go run ./cmd/tui chat
+```
+
+Type `/model` and you should see "My Provider" listed with your models.
+
+---
+
+## Checklist
+
+- [ ] `Config` struct with `APIKey`, `BaseURL`, `Model`
+- [ ] `ConfigFromEnv()` reads env vars with sensible defaults
+- [ ] `NewModel(ctx, Config)` returns `(model.LLM, error)`
+- [ ] `KnownModels` of type `catalog.ProviderCatalog`
+- [ ] `catalog.Register(KnownModels)` in `cmd/tui/main.go init()`
+- [ ] Provider added to failover chain in `buildRunner()`
+- [ ] `go build ./...` passes with no errors
+
+---
+
+## Notes on non-OpenAI-compatible APIs
+
+If the provider does not expose an OpenAI-compatible chat completions endpoint,
+you cannot use `oaibridge.New`. Instead, implement `model.LLM` directly:
+
+```go
+type myModel struct{ cfg Config }
+
+func (m *myModel) Name() string { return "myprovider/" + m.cfg.Model }
+
+func (m *myModel) GenerateContent(
+    ctx context.Context,
+    req *model.LLMRequest,
+    stream bool,
+) iter.Seq2[*model.LLMResponse, error] {
+    return func(yield func(*model.LLMResponse, error) bool) {
+        // Call the native API, convert response to *model.LLMResponse.
+    }
+}
+```
+
+See `model/echo/echo.go` for the simplest possible implementation.
+
+---
+
+## Next steps
+
+- [How-to: Add a colour theme](../how-to/add-theme.md)
+- [Explanation: Failover design](../explanation/failover.md)
+- [Reference: Provider reference](../reference/providers.md)
+
+---
+<!-- file: docs/how-to/add-theme.md -->
+# How-to: Add a colour theme
+
+**Goal:** Add a new built-in colour theme that appears in the `/theme` picker
+and the settings overlay.
+
+---
+
+## Where themes live
+
+All theme data is in `cmd/tui/chat.go`, starting at the comment
+`// ── Theme system ───`.
+
+The key types:
+
+```go
+// palette is a set of semantic design tokens for one theme.
+type palette struct {
+    name    string
+    // dark themes leave bg empty (transparent = terminal default)
+    // light themes set bg to an explicit hex color
+    bg      lipgloss.TerminalColor
+    surface lipgloss.TerminalColor  // chat bubble background
+    overlay lipgloss.TerminalColor  // overlay / picker background
+    text    lipgloss.TerminalColor  // primary text
+    subtle  lipgloss.TerminalColor  // secondary / dimmed text
+    accent  lipgloss.TerminalColor  // input border, provider name
+    // ... more fields
+}
+
+var builtinThemes = []palette{ ... }
+```
+
+Index 0 is the default (Catppuccin). `/theme` cycles the index.
+
+---
+
+## Step 1 — Choose your colour palette
+
+Decide on hex values for each semantic role. The 8 current themes are:
+
+| # | Name | Type |
+|---|---|---|
+| 0 | Catppuccin | Dark |
+| 1 | Tokyo Night | Dark |
+| 2 | Rosé Pine | Dark |
+| 3 | Nord | Dark |
+| 4 | Gruvbox | Dark |
+| 5 | GitHub Light | Light |
+| 6 | Solarized Light | Light |
+| 7 | Tango | Light |
+
+**Dark themes:** Leave `bg` empty (`lipgloss.TerminalColor("")`). The terminal
+default background shows through — no global fill is applied.
+
+**Light themes:** Set `bg` to an explicit colour. Every render pass calls
+`fillLines`/`paintLines` to ensure the background covers the full terminal
+width and survives ANSI reset sequences.
+
+---
+
+## Step 2 — Add the palette entry
+
+Open `cmd/tui/chat.go` and append to `builtinThemes`:
+
+```go
+{
+    name:    "My Theme",
+    bg:      lipgloss.Color(""),            // dark: empty; light: e.g. "#fafafa"
+    surface: lipgloss.Color("#1e1e2e"),
+    overlay: lipgloss.Color("#313244"),
+    text:    lipgloss.Color("#cdd6f4"),
+    subtle:  lipgloss.Color("#6c7086"),
+    accent:  lipgloss.Color("#89b4fa"),
+    // add any other palette fields defined in the struct
+},
+```
+
+---
+
+## Step 3 — Add a glamour Markdown style
+
+Open `cmd/tui/markdown.go`. The function `glamourStyleConfig` has a `switch`
+on `themeIdx`. Add a new `case` for your theme's index (N = length of
+`builtinThemes` before you added yours):
+
+```go
+case N:
+    // My Theme — dark, Catppuccin-like colour scheme
+    cfg.Heading.Color = stringPtr("#89b4fa")
+    cfg.Code.BackgroundColor = stringPtr("#313244")
+    // ... other overrides
+    return cfg
+```
+
+For **light themes**, do **not** set `cfg.Document.BackgroundColor` — it
+causes a white-on-white rendering artifact in some terminals.
+
+---
+
+## Step 4 — Verify
+
+```sh
+go build ./cmd/tui
+./tui chat
+```
+
+Type `/theme` and cycle until you reach your new theme. Confirm:
+
+- Header and footer have correct colours.
+- Input area background matches the theme.
+- Markdown code blocks render with the configured background.
+- No black gaps between UI sections.
+
+---
+
+## Troubleshooting
+
+**Black strip between sections:** Verify that your new theme is not the only
+one missing its entry in `glamourStyleConfig`. The `default` case returns a
+generic config; add an explicit `case` for your index.
+
+**Light theme shows white-on-white text:** Remove any `Document.BackgroundColor`
+setting from the glamour config for that theme.
+
+**`/theme` skips your theme:** Check that `builtinThemes` slice length and
+`glamourStyleConfig` case count are consistent.
+
+---
+
+## Related
+
+- [Explanation: TUI rendering](../explanation/tui-rendering.md)
+- [Reference: Themes](../reference/themes.md)
+- [ADR-0004: Why JoinVertical was removed](../adr/ADR-0004-lipgloss-join-vertical.md)
+
+---
+<!-- file: docs/how-to/add-skill.md -->
+# How-to: Add an agent skill
+
+**Goal:** Create a new skill SKILL.md file that the `/skills` command surfaces
+in the TUI, and optionally wire it to an ADK agent or toolset.
+
+---
+
+## What is a skill?
+
+In this repo, a **skill** is a Markdown specification file (`SKILL.md`) that
+defines a reusable agent behaviour: its purpose, trigger conditions, inputs,
+outputs, and step-by-step process.
+
+Skills live in `skills/` and are organised by domain:
+
+```
+skills/
+├── agents/
+│   ├── analyzer/SKILL.md
+│   ├── comparator/SKILL.md
+│   └── grader/SKILL.md
+├── collaboration/
+│   ├── code-review-consensus/SKILL.md
+│   └── ...
+├── design/
+├── documentation/
+├── engineering/
+└── workflow/
+```
+
+The ADK `SkillToolset` (`tool/skilltoolset/`) loads these files and exposes
+them as tools that the main agent can invoke.
+
+---
+
+## Step 1 — Create the skill directory and file
+
+```sh
+mkdir -p skills/engineering/my-skill
+```
+
+Create `skills/engineering/my-skill/SKILL.md`:
+
+```markdown
+# my-skill
+
+## Purpose
+
+One sentence: what this skill does and when to use it.
+
+## Trigger conditions
+
+- User asks to do X
+- Agent output contains Y pattern
+- After completing step Z
+
+## Inputs
+
+| Field | Type | Description |
+|---|---|---|
+| `context` | string | Background information |
+| `target` | string | The thing to act on |
+
+## Process
+
+1. **Analyse** the input for X, Y, Z.
+2. **Draft** a response following the template below.
+3. **Review** against the checklist.
+4. **Output** the final result.
+
+## Output format
+
+\`\`\`
+## Summary
+...
+
+## Details
+...
+\`\`\`
+
+## Checklist
+
+- [ ] Addressed all inputs
+- [ ] Output matches format
+- [ ] No hallucinated facts
+```
+
+---
+
+## Step 2 — Register the skill (optional)
+
+If you want the skill to be callable as an ADK tool, add it to the
+`localskilltoolset` initialisation in `cmd/tui/main.go`:
+
+```go
+import localskilltoolset "go-adk-q/tool/skilltoolset"
+
+// Inside buildRunner():
+skillset, err := localskilltoolset.New(localskilltoolset.Config{
+    SkillsDir: "skills",
+})
+```
+
+The `SkillToolset` discovers all `SKILL.md` files under `SkillsDir`
+automatically — no explicit registration per skill is needed.
+
+---
+
+## Step 3 — Verify in the TUI
+
+```sh
+go run ./cmd/tui chat
+```
+
+Type `/skills` — your new skill should appear in the list.
+
+---
+
+## Tips
+
+**Keep SKILL.md agent-legible.** LLMs read these files. Use clear headings,
+short sentences, and explicit enumerated steps.
+
+**Checklist = done criteria.** The checklist at the end is evaluated by the
+agent to determine whether the skill completed successfully.
+
+**Benchmark mode.** The Analyzer skill supports a benchmark mode where it
+compares outputs across two runs. If your skill produces structured output,
+consider adding a similar mode.
+
+---
+
+## Related
+
+- [Reference: Skills API](../reference/api.md#skills)
+- [Explanation: Architecture — skill toolset](../explanation/architecture.md#skill-toolset)
+
+---
+<!-- file: docs/how-to/add-provider.md -->
+# How-to: Add a provider (quick reference)
+
+This is a condensed checklist version of the full tutorial at
+[tutorials/add-provider.md](../tutorials/add-provider.md).
+
+---
+
+## Checklist
+
+```
+model/myprovider/
+└── myprovider.go
+```
+
+### myprovider.go must export
+
+- [ ] `Config` struct: `APIKey string`, `BaseURL string`, `Model string`
+- [ ] `ConfigFromEnv() Config` — reads `MYPROVIDER_API_KEY`, `MYPROVIDER_MODEL`, `MYPROVIDER_BASE_URL`
+- [ ] `NewModel(ctx context.Context, cfg Config) (model.LLM, error)`
+- [ ] `KnownModels catalog.ProviderCatalog`
+
+### cmd/tui/main.go
+
+- [ ] `import "go-adk-q/model/myprovider"` added
+- [ ] `catalog.Register(myprovider.KnownModels)` called in `init()`
+- [ ] Provider added to `failover.New(...)` in `buildRunner()`
+
+### Verification
+
+```sh
+go build ./...
+go test ./model/myprovider/...
+MYPROVIDER_API_KEY=x go run ./cmd/tui chat
+# /model → verify provider appears
+```
+
+---
+
+## oaibridge vs native LLM
+
+| Use | When |
+|---|---|
+| `oaibridge.New(ctx, oaibridge.Config{...})` | Provider has OpenAI-compatible `/v1/chat/completions` |
+| Implement `model.LLM` directly | Native or incompatible API |
+
+See `model/echo/echo.go` for the minimal `model.LLM` implementation.
+
+---
+
+## Related
+
+- [Tutorial: Add a new LLM provider](../tutorials/add-provider.md)
+- [Reference: Provider reference](../reference/providers.md)
+- [ADR-0005: Provider Config pattern](../adr/ADR-0005-provider-config-pattern.md)
+
+---
+<!-- file: docs/how-to/debug-tui.md -->
+# How-to: Debug a TUI rendering bug
+
+**Goal:** Systematically diagnose and fix visual artifacts in the Bubbletea
+TUI — black gaps, incorrect backgrounds, misaligned text.
+
+---
+
+## Step 0 — Reproduce in isolation
+
+Always reproduce with the smallest possible terminal and theme combination:
+
+```sh
+go build -o tui ./cmd/tui
+./tui chat
+```
+
+Resize the terminal to 80×24 and cycle through themes with `/theme`.
+Note which theme and which component the artifact appears in.
+
+---
+
+## Common artifacts and fixes
+
+### Black gap between UI sections
+
+**Symptom:** A horizontal band of black between the header, viewport, and
+input area, even on a light theme.
+
+**Root cause:** `lipgloss.JoinVertical` was used. It pads shorter blocks
+with plain spaces (no background colour), producing a black gap on terminals
+with a non-default background.
+
+**Fix:** Replace any `lipgloss.JoinVertical(...)` in `View()` with
+`strings.Join([]string{header, viewport, input}, "\n")` and ensure every
+component calls `fillLines` to pad itself to `m.width` columns.
+
+See [ADR-0004](../adr/ADR-0004-lipgloss-join-vertical.md) for the full
+investigation.
+
+---
+
+### Textarea interior is black on a light theme
+
+**Symptom:** The input area shows a black rectangle on light themes.
+
+**Root cause:** The `bubbles/textarea` component emits `\x1b[0m` (ANSI reset)
+internally. A reset kills any background colour set before the textarea is
+rendered. Subsequent characters are drawn on the terminal default (black on
+most emulators).
+
+**Fix:** Use `paintLines` after calling `m.textarea.View()`:
+
+```go
+raw := m.textarea.View()
+painted := paintLines(raw, bgSeq, m.width)
+```
+
+`paintLines` re-injects the background escape sequence after every `\x1b[0m`
+it finds, so the background is never lost.
+
+---
+
+### Wrong column width — content overflows or underflows
+
+**Symptom:** Text wraps too early or line padding leaves a gap at the right edge.
+
+**Cause:** Width passed to `fillLines` or `SetWidth` is wrong.
+
+**Checklist:**
+- Viewport content width: `m.width - 2` (account for 1-column border each side).
+- Textarea width: `m.width - 6` (matches `SetWidth(m.width-6)` with no prompt).
+- Every `fillLines` call uses `m.width` as `fullW`, not a derived value.
+
+---
+
+### Overlay (picker) has incorrect background
+
+**Symptom:** The `/model` or `/theme` picker has wrong colours.
+
+**Cause:** The overlay uses `s.overlay` (lipgloss style) but the content
+inside was built with `s.text`. Verify `styledSet.overlay` is constructed
+correctly in `newStyledSet()`.
+
+---
+
+## Debugging technique: unit test the renderer
+
+Every rendering path is covered by tests in `cmd/tui/mdtest_test.go`. To
+add a test for a new artifact:
+
+```go
+func TestMyArtifact(t *testing.T) {
+    m := newTestModel(t, 80, 24)
+    m.themeIdx = 5 // GitHub Light
+    view := m.View()
+    // assert: no bare \x1b[0m followed by non-background character
+    if strings.Contains(view, "\x1b[0m ") {
+        t.Error("bare reset found in view — background will be lost")
+    }
+}
+```
+
+Run:
+
+```sh
+go test ./cmd/tui/ -run TestMyArtifact -v
+```
+
+---
+
+## Key functions to understand
+
+| Function | File | Purpose |
+|---|---|---|
+| `fillLines` | `chat.go` | Pads each line to full terminal width with bg style |
+| `paintLines` | `chat.go` | Re-injects bg escape after every ANSI reset |
+| `setViewportContent` | `chat.go` | Pre-pads content to viewport height, then sets |
+| `applyThemeToTextarea` | `chat.go` | Propagates current theme into the textarea widget |
+| `inputView` | `chat.go` | Renders input area: textarea + painted background |
+| `View()` | `chat.go` | Top-level render; uses `strings.Join("\n")` not `JoinVertical` |
+
+---
+
+## Related
+
+- [Explanation: TUI rendering deep-dive](../explanation/tui-rendering.md)
+- [ADR-0004: JoinVertical removed](../adr/ADR-0004-lipgloss-join-vertical.md)
+- [Reference: Themes](../reference/themes.md)
+
+---
+<!-- file: docs/reference/cli.md -->
+# Reference: CLI
+
+The TUI binary exposes two Cobra subcommands.
+
+---
+
+## `tui chat`
+
+Start the interactive Bubbletea chat UI.
+
+```sh
+go run ./cmd/tui chat [flags]
+```
+
+### Flags
+
+| Flag | Default | Description |
+|---|---|---|
+| `--model` | (first available) | Override the starting model ID |
+| `--theme` | `0` (Catppuccin) | Starting theme index (0–7) |
+| `--log` | `` | Path to write structured JSON logs |
+
+### Keyboard shortcuts (in chat mode)
+
+| Key | Action |
+|---|---|
+| `Enter` | Send message |
+| `Shift+Enter` | Insert newline |
+| `↑` / `↓` | Scroll conversation history |
+| `PgUp` / `PgDn` | Scroll by page |
+| `Ctrl+C` or `Esc` | Quit |
+
+### Slash commands
+
+Type `/` to open the autocomplete menu:
+
+| Command | Description |
+|---|---|
+| `/settings` | Open settings overlay (theme, character limit) |
+| `/model` | Open model/provider picker |
+| `/theme` | Cycle to next colour theme |
+| `/help` | Toggle help overlay |
+| `/clear` | Clear conversation history |
+| `/skills` | List available agent skills |
+
+---
+
+## `tui run`
+
+One-shot mode: send a single message and print the response to stdout.
+
+```sh
+go run ./cmd/tui run "your message here"
+```
+
+Exit code is 0 on success, non-zero on error.
+
+Useful for scripting:
+
+```sh
+go run ./cmd/tui run "Summarise this file" < myfile.txt
+```
+
+---
+
+## Build and install
+
+```sh
+# Build binary to ./tui
+go build -o tui ./cmd/tui
+
+# Install to $GOPATH/bin
+go install ./cmd/tui
+```
+
+---
+<!-- file: docs/reference/config.md -->
+# Reference: Configuration
+
+All runtime configuration is via environment variables. No config file is
+required. Missing provider keys cause that provider to be skipped silently;
+the failover chain continues to the next available provider.
+
+---
+
+## Provider API keys
+
+| Variable | Provider |
+|---|---|
+| `GEMINI_API_KEY` | Google Gemini (via ADK native client) |
+| `GITHUB_TOKEN` | GitHub Models (OpenAI-compatible) |
+| `GROQ_API_KEY` | Groq |
+| `NVIDIA_API_KEY` | NVIDIA NIM |
+| `OPENROUTER_API_KEY` | OpenRouter |
+| `HUGGINGFACE_API_KEY` | Hugging Face Inference API |
+
+---
+
+## Provider model overrides
+
+Each provider reads a `_MODEL` variable to override the default model ID:
+
+| Variable | Default | Provider |
+|---|---|---|
+| `GEMINI_MODEL` | `gemini-2.0-flash` | Google Gemini |
+| `GITHUB_MODEL` | (catalog default) | GitHub Models |
+| `GROQ_MODEL` | `llama-3.3-70b-versatile` | Groq |
+| `NVIDIA_MODEL` | (catalog default) | NVIDIA |
+| `OPENROUTER_MODEL` | (catalog default) | OpenRouter |
+| `HUGGINGFACE_MODEL` | (catalog default) | Hugging Face |
+
+---
+
+## Provider base URL overrides
+
+Useful for pointing at local proxies, VLLM deployments, or private endpoints:
+
+| Variable | Provider |
+|---|---|
+| `GROQ_BASE_URL` | Groq |
+| `NVIDIA_BASE_URL` | NVIDIA |
+| `OPENROUTER_BASE_URL` | OpenRouter |
+| `HUGGINGFACE_BASE_URL` | Hugging Face |
+
+---
+
+## Application settings
+
+| Variable | Default | Description |
+|---|---|---|
+| `GO_ADK_Q_LOG` | `` | Path to write `slog` JSON logs; empty = stderr at WARN |
+| `GO_ADK_Q_THEME` | `0` | Starting theme index (0–7); overridden by `--theme` flag |
+| `GO_ADK_Q_SESSION_DIR` | `~/.go-adk-q/sessions` | Directory for persisted session files |
+
+---
+
+## Failover priority
+
+Providers are tried in registration order (defined in `cmd/tui/main.go init()`):
+
+1. GitHub Models
+2. Google Gemini
+3. Groq
+4. NVIDIA
+5. OpenRouter
+6. Hugging Face
+
+The first provider with a non-empty API key and a successful response wins.
+Subsequent providers are never called.
+
+Reorder the `catalog.Register` and `failover.New` calls in `cmd/tui/main.go`
+to change priority.
+
+---
+<!-- file: docs/reference/api.md -->
+# Reference: API
+
+Go package-level reference for the key public APIs in this module.
+
+Module path: `go-adk-q`
+
+---
+
+## model/catalog
+
+```go
+import "go-adk-q/model/catalog"
+```
+
+### ModelEntry
+
+```go
+type ModelEntry struct {
+    ID      string   // exact model ID passed to the API
+    Label   string   // display name; falls back to ID if empty
+    Tags    []string // e.g. "fast", "long-ctx"
+    Default bool     // pre-selected in the /model picker
+}
+
+func (e ModelEntry) DisplayName() string
+```
+
+### ProviderCatalog
+
+```go
+type ProviderCatalog struct {
+    Provider string        // lowercase identifier, e.g. "groq"
+    Label    string        // display name, e.g. "Groq"
+    Models   []ModelEntry
+}
+```
+
+### Functions
+
+```go
+func Register(c ProviderCatalog)
+func All() []ProviderCatalog
+func ForProvider(name string) (ProviderCatalog, bool)
+```
+
+---
+
+## model/failover
+
+```go
+import "go-adk-q/model/failover"
+```
+
+```go
+// New creates a failover chain. primary must not be nil.
+// Nil fallbacks are silently dropped.
+func New(primary model.LLM, fallbacks ...model.LLM) *Model
+
+func (m *Model) Name() string
+func (m *Model) GenerateContent(
+    ctx context.Context,
+    req *model.LLMRequest,
+    stream bool,
+) iter.Seq2[*model.LLMResponse, error]
+```
+
+---
+
+## model/oaibridge
+
+```go
+import "go-adk-q/model/oaibridge"
+```
+
+```go
+type Config struct {
+    APIKey    string
+    BaseURL   string
+    ModelName string
+}
+
+func New(ctx context.Context, cfg Config) (model.LLM, error)
+```
+
+---
+
+## model/echo
+
+```go
+import "go-adk-q/model/echo"
+```
+
+```go
+// New returns a model.LLM that echoes the user's last message.
+// No API key required. Useful for testing.
+func New() model.LLM
+```
+
+---
+
+## tool/skilltoolset
+
+```go
+import localskilltoolset "go-adk-q/tool/skilltoolset"
+```
+
+```go
+type Config struct {
+    SkillsDir string // path to skills/ directory
+}
+
+func New(cfg Config) (tool.Toolset, error)
+```
+
+Discovers all `SKILL.md` files under `SkillsDir` and exposes each as an
+ADK `tool.Tool` that returns the skill's Markdown content.
+
+---
+
+## Skills
+
+<a name="skills"></a>
+
+Skills are Markdown files in `skills/`. They are loaded by `SkillToolset`
+and returned verbatim to the calling agent. Each file follows the structure:
+
+```markdown
+# skill-name
+
+## Purpose
+## Trigger conditions
+## Inputs
+## Process
+## Output format
+## Checklist
+```
+
+The agent uses the Checklist section to determine whether the skill completed.
+
+---
+
+## agents
+
+```go
+import "go-adk-q/agents"
+```
+
+### LlmAuditor
+
+```go
+// LlmAuditor is a custom agent that audits LLM outputs for quality,
+// accuracy, and instruction-following. Implements agent.Agent directly
+// (not LlmAgent) so it can inspect raw request/response pairs.
+func NewLlmAuditor(model model.LLM) (agent.Agent, error)
+```
+
+### Collaboration agents
+
+Located in `agents/collaboration/`. Multi-agent workflows using ADK's
+`agenttool` pattern for agent-to-agent delegation.
+
+---
+<!-- file: docs/reference/themes.md -->
+# Reference: Themes
+
+The TUI ships with 8 built-in colour themes. Cycle with `/theme` or set the
+starting theme via the `--theme` flag (index 0–7).
+
+---
+
+## Theme index
+
+| Index | Name | Type | Default |
+|---|---|---|---|
+| 0 | Catppuccin | Dark | ✓ |
+| 1 | Tokyo Night | Dark | |
+| 2 | Rosé Pine | Dark | |
+| 3 | Nord | Dark | |
+| 4 | Gruvbox | Dark | |
+| 5 | GitHub Light | Light | |
+| 6 | Solarized Light | Light | |
+| 7 | Tango | Light | |
+
+---
+
+## Dark vs light themes
+
+**Dark themes** leave `bg` empty in the palette definition. The terminal's
+own background colour shows through. ANSI resets (`\x1b[0m`) are harmless
+because the default terminal background is already dark.
+
+**Light themes** set `bg` to an explicit hex colour. The rendering pipeline
+uses `fillLines` and `paintLines` to ensure every row is filled with this
+colour, even after ANSI reset sequences emitted by third-party widgets.
+
+---
+
+## Palette fields
+
+Each theme defines the following semantic tokens:
+
+| Field | Role |
+|---|---|
+| `name` | Display name in `/theme` picker |
+| `bg` | Terminal background fill (empty for dark themes) |
+| `surface` | Chat bubble and card background |
+| `overlay` | Picker and overlay background |
+| `text` | Primary text colour |
+| `subtle` | Secondary / dimmed text |
+| `accent` | Input border, provider name in footer |
+
+---
+
+## Glamour Markdown styles
+
+Each theme index maps to a `glamourStyleConfig` case in `cmd/tui/markdown.go`.
+This configures heading colours, code block backgrounds, link colours, etc.
+for the Markdown renderer.
+
+Adding a new theme requires both:
+1. A `palette` entry in `builtinThemes` (in `chat.go`)
+2. A `case N:` in `glamourStyleConfig` (in `markdown.go`)
+
+See [how-to/add-theme.md](../how-to/add-theme.md) for the step-by-step guide.
+
+---
+
+## Source locations
+
+| File | Contains |
+|---|---|
+| `cmd/tui/chat.go` | `palette`, `builtinThemes`, `styledSet`, `fillLines`, `paintLines` |
+| `cmd/tui/markdown.go` | `glamourStyleConfig` per theme index |
+
+---
+<!-- file: docs/reference/providers.md -->
+# Reference: Providers
+
+This page is the authoritative reference for every LLM provider package in
+`model/`. Each package follows the same three-export contract.
+
+---
+
+## Contract
+
+```go
+type Config struct { ... }
+func ConfigFromEnv() Config
+func NewModel(ctx context.Context, cfg Config) (model.LLM, error)
+```
+
+All providers also export `KnownModels catalog.ProviderCatalog`.
+
+---
+
+## Google Gemini
+
+**Package:** `google.golang.org/adk/model/gemini` (ADK native)
+
+**Key variable:** `GEMINI_API_KEY`
+
+**Usage:**
+
+```go
+import "google.golang.org/adk/model/gemini"
+
+m, err := gemini.New(ctx, "gemini-2.0-flash", &genai.ClientConfig{
+    APIKey: os.Getenv("GEMINI_API_KEY"),
+})
+```
+
+Note: Gemini uses the ADK-native client, not oaibridge. The model ID is
+passed as a positional argument (ADK convention for the Gemini client).
+
+**Supported models (partial):**
+
+| ID | Notes |
+|---|---|
+| `gemini-2.0-flash` | Default; fast |
+| `gemini-2.5-flash` | Fast; latest |
+| `gemini-2.5-pro` | High quality |
+| `gemini-1.5-pro` | Long context |
+| `gemini-1.5-flash` | Fast |
+
+---
+
+## GitHub Models
+
+**Package:** `go-adk-q/model/githubmodels`
+
+**Key variable:** `GITHUB_TOKEN`
+
+**Config:**
+
+```go
+cfg := githubmodels.ConfigFromEnv()
+m, err := githubmodels.NewModel(ctx, cfg)
+```
+
+**Notes:** Uses the Azure AI Inference API endpoint at
+`https://models.inference.ai.azure.com`. GitHub Models are free for personal
+accounts within rate limits.
+
+---
+
+## Groq
+
+**Package:** `go-adk-q/model/groq`
+
+**Key variable:** `GROQ_API_KEY`
+
+**Config:**
+
+```go
+cfg := groq.ConfigFromEnv()
+// cfg.Model defaults to "llama-3.3-70b-versatile"
+m, err := groq.NewModel(ctx, cfg)
+```
+
+**Supported models (partial):**
+
+| ID | Notes |
+|---|---|
+| `llama-3.3-70b-versatile` | Default; fast |
+| `llama-3.1-8b-instant` | Fastest |
+| `mixtral-8x7b-32768` | Long context |
+
+---
+
+## NVIDIA NIM
+
+**Package:** `go-adk-q/model/nvidia`
+
+**Key variable:** `NVIDIA_API_KEY`
+
+**Config:**
+
+```go
+cfg := nvidia.ConfigFromEnv()
+m, err := nvidia.NewModel(ctx, cfg)
+```
+
+**Notes:** Uses `https://integrate.api.nvidia.com/v1` by default. Override
+with `NVIDIA_BASE_URL`.
+
+---
+
+## OpenRouter
+
+**Package:** `go-adk-q/model/openrouter`
+
+**Key variable:** `OPENROUTER_API_KEY`
+
+**Config:**
+
+```go
+cfg := openrouter.ConfigFromEnv()
+m, err := openrouter.NewModel(ctx, cfg)
+```
+
+**Notes:** OpenRouter proxies hundreds of models. Set `OPENROUTER_MODEL` to
+any model ID listed at openrouter.ai/models.
+
+---
+
+## Hugging Face
+
+**Package:** `go-adk-q/model/huggingface`
+
+**Key variable:** `HUGGINGFACE_API_KEY`
+
+**Config:**
+
+```go
+cfg := huggingface.ConfigFromEnv()
+m, err := huggingface.NewModel(ctx, cfg)
+```
+
+---
+
+## Echo (testing)
+
+**Package:** `go-adk-q/model/echo`
+
+A deterministic model that echoes the user's input. No API key required.
+Used in unit tests and as a development placeholder.
+
+```go
+import "go-adk-q/model/echo"
+
+m := echo.New()
+```
+
+---
+
+## oaibridge
+
+**Package:** `go-adk-q/model/oaibridge`
+
+Internal adapter that wraps any OpenAI-compatible endpoint (via Genkit
+`compat_oai`) to produce a `model.LLM`. Used by most provider packages.
+
+```go
+import "go-adk-q/model/oaibridge"
+
+m, err := oaibridge.New(ctx, oaibridge.Config{
+    APIKey:    "...",
+    BaseURL:   "https://api.example.com/v1",
+    ModelName: "my-model",
+})
+```
+
+---
+
+## failover
+
+**Package:** `go-adk-q/model/failover`
+
+Wraps multiple `model.LLM` instances into a single model that tries each
+in order, returning the first successful response.
+
+```go
+import "go-adk-q/model/failover"
+
+chain := failover.New(primary, backup1, backup2)
+// chain.Name() == "failover(primary → backup1 → backup2)"
+```
+
+See [explanation/failover.md](../explanation/failover.md) for design details.
+
+---
+<!-- file: docs/explanation/architecture.md -->
+# Explanation: Architecture
+
+This document explains **why** go-adk-q is structured the way it is, and
+how the major components relate to each other.
+
+---
+
+## High-level diagram
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    cmd/tui (Bubbletea TUI)               │
+│  ┌─────────┐  ┌──────────┐  ┌────────┐  ┌───────────┐  │
+│  │  chat   │  │  slash   │  │ model  │  │ settings  │  │
+│  │  .go    │  │  .go     │  │ picker │  │ overlay   │  │
+│  └────┬────┘  └──────────┘  └────────┘  └───────────┘  │
+│       │                                                   │
+└───────┼───────────────────────────────────────────────────┘
+        │ ADK runner.Run / RunAsync
+        ▼
+┌───────────────────────────────────────────────────────────┐
+│                     ADK Layer                             │
+│  ┌───────────────────┐  ┌────────────────────────────┐   │
+│  │ runner.Runner     │  │ session.SessionService     │   │
+│  │                   │  │ memory.MemoryService       │   │
+│  │ agent.Agent       │  │ artifact.ArtifactService   │   │
+│  │ (LlmAgent or      │  └────────────────────────────┘   │
+│  │  custom Run func) │                                    │
+│  └─────────┬─────────┘                                   │
+│            │ model.LLM.GenerateContent                    │
+└────────────┼──────────────────────────────────────────────┘
+             │
+┌────────────┼──────────────────────────────────────────────┐
+│            ▼         model/ layer                         │
+│  ┌──────────────────┐                                     │
+│  │ failover.Model   │ tries each provider left→right      │
+│  └──────┬───────────┘                                     │
+│         │                                                  │
+│  ┌──────┴─────────────────────────────────────────────┐   │
+│  │ github  │ gemini │ groq │ nvidia │ openrouter │ hf  │  │
+│  └─────────┴────────┴──────┴────────┴────────────┴────┘   │
+│         │                                                  │
+│  ┌──────┴──────────────┐                                   │
+│  │  oaibridge (Genkit  │ OpenAI-compat → genai.Client      │
+│  │  compat_oai)        │                                   │
+│  └─────────────────────┘                                   │
+└───────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Layer responsibilities
+
+### cmd/tui — presentation layer
+
+The Bubbletea TUI is a pure view/update layer. It:
+- Renders the conversation history, input area, overlays, and footer.
+- Sends user input to the ADK runner via `runAsync`.
+- Handles slash commands (`/theme`, `/model`, `/settings`, `/help`, `/clear`,
+  `/skills`) locally without going through the agent.
+- Manages visual state: theme index, picker modes, settings form.
+
+The TUI does **not** contain any model or agent logic.
+
+### ADK layer — agent execution
+
+`google.golang.org/adk` handles:
+- Agent lifecycle (`LlmAgent`, `SequentialAgent`, `ParallelAgent`, `LoopAgent`).
+- Tool invocation and result injection.
+- Session management (conversation history).
+- Memory retrieval and preloading.
+- Artifact storage and loading.
+- Skill toolset exposure.
+
+The runner bridges the TUI and the agent: it owns the session, calls
+`agent.Run`, and streams back `LLMResponse` events.
+
+### model/ layer — provider abstraction
+
+Each provider package is a thin adapter that translates between the ADK
+`model.LLM` interface and the provider's wire protocol. Most providers use
+`oaibridge` to delegate to Genkit's `compat_oai` client, which handles
+OpenAI-compatible chat completions.
+
+`failover.Model` wraps multiple `model.LLM` instances and provides
+transparent retry across providers.
+
+---
+
+## ADK agent patterns in use
+
+| Pattern | Where | Description |
+|---|---|---|
+| `LlmAgent` | `cmd/tui/main.go buildRunner()` | Main conversational agent |
+| Custom `Run` | `agents/llmauditor.go` | LLM output quality auditor |
+| `agenttool` | `agents/collaboration/` | Agent-to-agent delegation |
+| `SequentialAgent` | samples | State flows via `OutputKey` + `{key}` interpolation |
+| `ParallelAgent` | samples | Concurrent sub-agent execution |
+| `LoopAgent` | samples | Iterative refinement |
+
+---
+
+## Skill toolset
+
+<a name="skill-toolset"></a>
+
+The `localskilltoolset` package (`tool/skilltoolset/`) implements
+`tool.Toolset`. It:
+1. Walks `skills/` at startup, finding all `SKILL.md` files.
+2. Creates one `tool.Tool` per file, named by the skill's directory path.
+3. When invoked, returns the skill's Markdown content to the agent.
+
+The agent can then follow the skill's instructions directly in its response.
+
+---
+
+## Data flow for a single user message
+
+```
+User types message → Enter key
+    → TUI sends message to runner via runAsync goroutine
+    → runner.RunAsync(ctx, userID, sessionID, content)
+    → ADK loads session history
+    → LlmAgent builds LLMRequest (history + tools + instruction)
+    → failover.Model.GenerateContent tries providers in order
+        → provider calls API, buffers full response
+        → if error, tries next provider
+    → LLMResponse yielded back through iterator
+    → TUI receives response parts, renders Markdown
+    → Session updated with assistant turn
+```
+
+---
+
+## Why Genkit only for oaibridge?
+
+Genkit (`github.com/firebase/genkit/go`) provides a mature, well-tested
+OpenAI-compatible client via `compat_oai`. Rather than writing a raw HTTP
+client for each provider, `oaibridge` delegates to Genkit's client.
+
+Genkit is **not** used for agent orchestration, flow management, or
+telemetry — that is all handled by the ADK. Genkit appears only in the
+`model/oaibridge` package.
+
+See [ADR-0002](../adr/ADR-0002-genkit-compat-oai.md) for the decision record.
+
+---
+<!-- file: docs/explanation/tui-rendering.md -->
+# Explanation: TUI rendering
+
+This document explains how the Bubbletea TUI renders correctly across 8 themes,
+including the specific techniques required to avoid background colour loss.
+
+---
+
+## The core problem
+
+Bubbletea's Bubble components (textarea, viewport) emit raw ANSI escape
+sequences. When a component emits `\x1b[0m` (the ANSI "reset all attributes"
+sequence), it clears **every** style attribute — including the background colour
+that was set by the surrounding shell. On light themes with an explicit
+background, this produces a black rectangle where the terminal default
+(usually black) shows through.
+
+Additionally, `lipgloss.JoinVertical` — the obvious tool for stacking UI
+sections vertically — pads each section to a common width using plain spaces,
+with no background style. On terminals where the default background is not the
+theme background, this produces visible black horizontal gaps.
+
+---
+
+## Solution: no JoinVertical, use strings.Join
+
+The `View()` method in `chat.go` assembles the final frame as:
+
+```go
+return strings.Join([]string{
+    header,
+    viewportSection,
+    inputSection,
+    footer,
+}, "\n")
+```
+
+Each section is independently responsible for filling itself to exactly
+`m.width` columns with the correct background colour. This way no inter-section
+padding is needed.
+
+---
+
+## fillLines
+
+```go
+func fillLines(content string, bgStyle lipgloss.Style, fullW int) string
+```
+
+Called on every rendered section before it is joined. For each line:
+1. Measure the visible width (excluding ANSI escapes) using `lipgloss.Width`.
+2. Append `bgStyle.Render(strings.Repeat(" ", fullW - visibleWidth))` to pad.
+
+For dark themes, `bgStyle` has no background set — `Background("")` is a
+no-op in lipgloss — so `fillLines` is a cheap pass-through.
+
+For light themes, `bgStyle` carries the theme's explicit background colour,
+so each padded space extends the background to the right edge.
+
+---
+
+## paintLines
+
+```go
+func paintLines(content string, bgSeq string, fullW int) string
+```
+
+Used specifically on the textarea output. The textarea emits `\x1b[0m`
+internally. `paintLines` processes the content byte-by-byte, and after every
+`\x1b[0m` it finds, it re-injects `bgSeq` (the ANSI sequence for the theme
+background colour).
+
+`bgSeq` is obtained by probing a one-character render:
+
+```go
+bgSeq := lipgloss.NewStyle().Background(p.bg).Render(" ")[:len(p.bg)+...] // probe
+```
+
+For dark themes, `p.bg` is `""` — `Render(" ")` with no background emits just
+`" "`, so `bgSeq` is empty and `paintLines` becomes a no-op.
+
+---
+
+## setViewportContent
+
+```go
+func setViewportContent(vp *viewport.Model, content string, height int, bgStyle lipgloss.Style)
+```
+
+Before setting viewport content, pre-pads with `height` blank lines filled
+with `bgStyle`. This ensures that when the conversation history is shorter
+than the viewport, the empty space below the last message still carries the
+theme background (not terminal default black).
+
+---
+
+## Textarea width formula
+
+The textarea's `SetWidth` call uses `m.width - 6`. This value was derived
+empirically to match the visual width of the input area after accounting for:
+- 1-column padding on each side of the input border: `- 2`
+- 1-column left margin: `- 1`
+- Internal textarea padding: `- 3`
+
+The `inputView` function also calls `paintLines` on the raw textarea output
+and then `fillLines` on each line to ensure the background extends to the
+right edge.
+
+---
+
+## Light theme rendering pipeline
+
+For a light theme, a single render frame follows this path:
+
+```
+m.headerView()
+    → lipgloss.Render with accent/text styles
+    → fillLines(..., bgStyle, m.width)
+
+m.viewport.View()
+    → glamour renders Markdown with explicit colours
+    → setViewportContent pre-pads and fills
+    → fillLines each line
+
+m.inputView()
+    → m.textarea.View() — emits \x1b[0m internally
+    → paintLines(raw, bgSeq, m.width) — re-arms bg after each reset
+    → fillLines each painted line
+
+m.footerView()
+    → fillLines(..., chromeBgStyle, m.width)
+
+strings.Join([header, viewport, input, footer], "\n")
+```
+
+---
+
+## Dark theme rendering pipeline
+
+Identical path, but `bgSeq` is `""` and `bgStyle` has no background. All
+fill and paint operations are no-ops. The terminal's own background colour
+provides the visual fill.
+
+---
+
+## Related
+
+- [How-to: Debug a TUI rendering bug](../how-to/debug-tui.md)
+- [ADR-0004: Why JoinVertical was removed](../adr/ADR-0004-lipgloss-join-vertical.md)
+- [Reference: Themes](../reference/themes.md)
+
+---
+<!-- file: docs/explanation/failover.md -->
+# Explanation: Failover design
+
+This document explains the design of `model/failover` — why it works the way
+it does and what trade-offs were made.
+
+---
+
+## Motivation
+
+LLM providers return transient errors: rate-limit 429s, 503 overloads, model
+routing failures. Without failover, a single provider error halts the
+conversation. With failover, the agent automatically retries on the next
+available provider.
+
+---
+
+## The buffering trade-off
+
+The most natural implementation would stream directly from the winning
+provider's response iterator to the caller. But streaming creates a problem:
+
+> Once the first token is yielded to the caller, the caller has committed to
+> that provider. A mid-stream error cannot be retried transparently — the
+> caller already received partial output.
+
+`failover.Model` resolves this by buffering: every provider's
+`GenerateContent` is called with `stream=false` and the full response is
+collected before it is forwarded to the caller. This means:
+
+- If a provider errors mid-response, the error is caught before any output
+  reaches the caller.
+- The next provider is tried with the original request.
+- The caller receives a complete, single response.
+
+**Trade-off:** The first token is delayed until the full response is buffered.
+For long responses this adds latency. The design prioritises **reliability
+over streaming latency**.
+
+See [ADR-0003](../adr/ADR-0003-failover-buffered.md) for the decision record.
+
+---
+
+## Provider ordering
+
+Providers are tried left-to-right in the order passed to `failover.New`.
+In `cmd/tui/main.go`:
+
+```
+GitHub Models → Google Gemini → Groq → NVIDIA → OpenRouter → Hugging Face
+```
+
+The ordering reflects:
+1. Free/low-cost providers first (GitHub Models has a free tier).
+2. High-quality providers before speed-optimised providers.
+3. Well-tested integrations before newer ones.
+
+You can reorder by changing the argument order to `failover.New`.
+
+---
+
+## Nil model handling
+
+`failover.New` silently drops nil models. This lets provider constructors
+return `(nil, err)` when the API key is missing, without requiring the
+caller to conditionally include them:
+
+```go
+g, _ := groq.NewModel(ctx, groq.ConfigFromEnv())
+n, _ := nvidia.NewModel(ctx, nvidia.ConfigFromEnv())
+
+// If GROQ_API_KEY is not set, g is nil and is dropped from the chain.
+chain := failover.New(primary, g, n)
+```
+
+---
+
+## Error logging
+
+Each provider failure is logged at `WARN` level with:
+- `provider`: the provider's `model.LLM.Name()` string
+- `index`: position in the chain
+- `remaining`: how many providers are left to try
+- `error`: the underlying error
+
+A successful recovery via fallback is logged at `INFO` level.
+
+When all providers fail, the final error joins all individual errors with
+`errors.Join` so the caller sees the complete failure chain.
+
+---
+
+## Name string
+
+`Model.Name()` returns a composite identifier:
+
+```
+failover(gemini-2.0-flash → groq/llama-3.3-70b-versatile → ...)
+```
+
+This appears in the TUI footer and in logs, making it easy to see which
+chain is active at a glance.
+
+---
+
+## collectAll helper
+
+```go
+func collectAll(ctx context.Context, llm model.LLM, req *model.LLMRequest) ([]*model.LLMResponse, error)
+```
+
+Drains the provider's iterator into a `[]*model.LLMResponse` slice. Nil
+responses (emitted by some providers as streaming heartbeats) are silently
+dropped. Forwarding nil responses causes nil-pointer dereferences in the ADK
+runner, so the drop is intentional.
+
+---
+
+## Context propagation
+
+Between provider attempts, `failover.Model.GenerateContent` checks
+`ctx.Err()`. If the context is cancelled (user pressed Ctrl+C, or the TUI
+is shutting down), the chain stops immediately rather than trying the next
+provider.
+
+---
+
+## Related
+
+- [Reference: failover package](../reference/providers.md#failover)
+- [ADR-0003: Buffered failover](../adr/ADR-0003-failover-buffered.md)
+- [How-to: Add a new provider](../how-to/add-provider.md)
+
+---
+<!-- file: docs/adr/ADR-0001-adk-as-agent-layer.md -->
+# ADR-0001: Use Google ADK Go as the agent layer
+
+**Status:** Accepted  
+**Date:** 2025  
+**Deciders:** Project leads
+
+---
+
+## Context
+
+We need an agent framework that supports:
+- Typed tool definitions with JSON schema generation.
+- Session and memory management.
+- Composable agent patterns (sequential, parallel, loop, multi-agent).
+- Artifact storage.
+- Skill toolsets.
+- A stable Go API.
+
+## Decision
+
+Use `google.golang.org/adk` v1.2.0 as the sole agent orchestration layer.
+
+## Alternatives considered
+
+| Alternative | Rejected because |
+|---|---|
+| Genkit flows | Genkit's flow system is optimised for HTTP-triggered pipelines, not interactive agents. No built-in session or memory services. |
+| LangChain Go | Less idiomatic Go; fewer ADK-native patterns (sequential/parallel agents, skill toolsets). |
+| Raw HTTP + custom orchestration | Too much boilerplate; session management, tool injection, and multi-agent delegation would all need to be written from scratch. |
+
+## Consequences
+
+- All agent, tool, session, memory, and artifact code uses ADK types and interfaces.
+- Genkit is limited to the `compat_oai` model bridge (see ADR-0002).
+- Any ADK API changes in v1.3+ may require migration effort.
+- The ADK's `iter.Seq2` streaming model is used throughout the codebase.
+
+---
+<!-- file: docs/adr/ADR-0002-genkit-compat-oai.md -->
+# ADR-0002: Use Genkit compat_oai only for model bridging
+
+**Status:** Accepted  
+**Date:** 2025  
+**Deciders:** Project leads
+
+---
+
+## Context
+
+Most LLM providers expose an OpenAI-compatible `/v1/chat/completions` endpoint.
+We need a Go HTTP client that handles authentication, retries, and request/response
+serialisation for this API.
+
+Genkit (`github.com/firebase/genkit/go`) provides exactly this via its
+`compat_oai` package, which wraps the `github.com/openai/openai-go` client.
+
+## Decision
+
+Use Genkit v1.7.0 **only** as an OpenAI-compatible HTTP client, accessed
+through the `model/oaibridge` package. Genkit is not used for:
+- Flow management
+- Prompt templates
+- Telemetry/tracing
+- Agent orchestration
+- Any user-facing feature
+
+## Boundaries
+
+```
+go-adk-q/model/oaibridge   ← only file that imports firebase/genkit
+model/{groq,nvidia,...}    ← import oaibridge, not genkit directly
+all other packages         ← must not import firebase/genkit
+```
+
+## Alternatives considered
+
+| Alternative | Rejected because |
+|---|---|
+| `github.com/openai/openai-go` directly | `compat_oai` already wraps this cleanly; avoids duplicating auth + retry logic. |
+| Per-provider raw HTTP | 6+ providers × boilerplate = too much maintenance. |
+| Full Genkit pipeline | Entangles agent logic with Genkit's flow system; conflicts with ADK's agent model. |
+
+## Consequences
+
+- Adding a new OpenAI-compatible provider requires only a thin package using `oaibridge`.
+- Providers with non-compatible APIs must implement `model.LLM` directly.
+- Genkit version bumps only affect `model/oaibridge` — isolated blast radius.
+
+---
+<!-- file: docs/adr/ADR-0003-failover-buffered.md -->
+# ADR-0003: Buffered (non-streaming) failover
+
+**Status:** Accepted  
+**Date:** 2025  
+**Deciders:** Project leads
+
+---
+
+## Context
+
+The failover model must retry a failed provider transparently. The ADK model
+interface supports both streaming (incremental token delivery) and non-streaming
+(complete response) modes via the `stream bool` parameter to `GenerateContent`.
+
+## Decision
+
+`failover.Model.GenerateContent` always calls providers with `stream=false`
+internally, regardless of the `stream` parameter passed by the caller. The
+full response is buffered before being forwarded.
+
+## Rationale
+
+Once the first token is yielded to the caller, the caller has committed to
+that provider. If the provider errors mid-stream, the caller has already
+received partial output and the request cannot be retried cleanly. By
+buffering the full response, failover can:
+
+1. Detect errors before committing to the caller.
+2. Try the next provider with the original request.
+3. Forward a complete, clean response.
+
+## Trade-offs
+
+| Benefit | Cost |
+|---|---|
+| Transparent retry on any error | First token delayed until full response is ready |
+| Caller sees complete responses only | Higher memory usage for large responses |
+| Simple, correct semantics | Streaming latency benefit is lost |
+
+## Future consideration
+
+If streaming latency becomes important, the failover model could implement a
+"probe" mode: send a small preflight request to verify the provider is
+available before committing to a streaming response. This was not implemented
+because:
+- Most failures are transient (rate limits, brief outages) and resolve quickly.
+- The extra round-trip would add latency in the common (no-failure) case.
+- The current design is significantly simpler to reason about.
+
+## Consequences
+
+- `failover.Model` is reliable but introduces latency proportional to response length.
+- The `stream` parameter to `GenerateContent` is accepted but ignored internally.
+- `collectAll` drops nil `*model.LLMResponse` values (provider heartbeats) to
+  prevent nil-pointer dereferences in the ADK runner.
+
+---
+<!-- file: docs/adr/ADR-0004-lipgloss-join-vertical.md -->
+# ADR-0004: Remove lipgloss.JoinVertical from View()
+
+**Status:** Accepted  
+**Date:** 2025  
+**Deciders:** Project leads
+
+---
+
+## Context
+
+The Bubbletea TUI's `View()` function must assemble several UI sections
+(header, viewport, input, footer) into a single string frame. The natural
+Lipgloss primitive for this is `lipgloss.JoinVertical(lipgloss.Left, ...)`.
+
+## Problem discovered
+
+`JoinVertical` (lipgloss `join.go` lines 144–145) pads shorter blocks to the
+width of the widest block using plain `strings.Repeat(" ", w)`. These padding
+spaces have no background style applied. On terminals where the default
+background is black (the majority), this produces visible black horizontal
+gaps between sections — especially visible on light themes with an explicit
+background colour.
+
+The source:
+
+```go
+// lipgloss/join.go:144-145
+row += strings.Repeat(" ", w-lipgloss.Width(str))
+```
+
+No style is applied to the padding — it inherits the terminal default.
+
+## Decision
+
+Replace all `lipgloss.JoinVertical(...)` calls in `View()` with
+`strings.Join([]string{...}, "\n")`. Each section is independently
+responsible for filling itself to exactly `m.width` columns using
+`fillLines` with the theme's background style.
+
+## Implementation
+
+```go
+// Before (produces black gaps):
+return lipgloss.JoinVertical(lipgloss.Left, header, viewport, input, footer)
+
+// After (no gaps):
+return strings.Join([]string{header, viewport, input, footer}, "\n")
+```
+
+Each section calls `fillLines(content, s.chromeBg, m.width)` before being
+joined, ensuring every row is full-width with the correct background.
+
+## Consequences
+
+- No more black gaps between sections on any theme.
+- Each component must manage its own width padding — slightly more code, but
+  correctly encapsulated.
+- `fillLines` and `paintLines` are the canonical mechanisms for background fill.
+- This pattern must be preserved when adding new UI sections.
+
+## Verification
+
+The fix is covered by `TestRenderMarkdown*` tests in `cmd/tui/mdtest_test.go`,
+which assert that rendered frames contain no unexpected bare spaces at section
+boundaries.
+
+---
+<!-- file: docs/adr/ADR-0005-provider-config-pattern.md -->
+# ADR-0005: Provider Config struct pattern
+
+**Status:** Accepted  
+**Date:** 2025  
+**Deciders:** Project leads
+
+---
+
+## Context
+
+Each LLM provider package needs a way to:
+1. Accept configuration (API key, base URL, model ID).
+2. Read configuration from environment variables.
+3. Construct a `model.LLM` instance.
+
+Several Go patterns exist for this: positional arguments, functional options,
+a config struct, environment-variable-only.
+
+## Decision
+
+Every provider package exports exactly:
+
+```go
+type Config struct {
+    APIKey  string
+    BaseURL string
+    Model   string
+}
+
+func ConfigFromEnv() Config
+func NewModel(ctx context.Context, cfg Config) (model.LLM, error)
+```
+
+No positional arguments to `NewModel`. No package-level `New(apiKey, model string)`.
+
+## Rationale
+
+| Property | Positional args | Functional options | Config struct |
+|---|---|---|---|
+| Self-documenting call sites | ✗ | ✓ | ✓ |
+| Easy to extend without breaking callers | ✗ | ✓ | ✓ |
+| Works with `ConfigFromEnv()` pattern | awkward | awkward | ✓ |
+| Consistent across all providers | depends | depends | ✓ |
+| Serialisable / testable | harder | harder | ✓ |
+
+The `Config` struct is self-documenting at the call site:
+
+```go
+// Clear and readable — no need to look up argument order:
+m, err := groq.NewModel(ctx, groq.Config{
+    APIKey: os.Getenv("GROQ_API_KEY"),
+    Model:  "llama-3.3-70b-versatile",
+})
+
+// vs unclear positional:
+m, err := groq.NewModel(ctx, apiKey, model, baseURL)
+```
+
+`ConfigFromEnv()` enables zero-friction usage in the common case while
+remaining overridable:
+
+```go
+cfg := groq.ConfigFromEnv()
+cfg.Model = "llama-3.1-8b-instant" // override one field
+m, err := groq.NewModel(ctx, cfg)
+```
+
+## Consequences
+
+- All provider packages follow the same three-export pattern — easy to learn once.
+- Adding a new config field (e.g. `Timeout`) is a non-breaking change.
+- `failover.New(primary, backup1, backup2)` can safely receive `nil` (from
+  providers that returned an error) because nil models are dropped silently.
+- The Gemini provider is an exception: it uses the ADK-native `gemini.New`
+  which takes a positional model ID. This is intentional — the ADK's Gemini
+  client is not wrapped in a custom package.
+

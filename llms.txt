@@ -1,0 +1,52 @@
+# go-adk-q
+
+> Minimal, idiomatic Go reference implementation for the Google ADK Go SDK.
+> Multi-provider failover · Bubbletea TUI · ADK Skills · LLM Auditor · Memory · Artifacts
+
+## Docs
+
+- /docs/README.md — Documentation index and navigation
+- /docs/tutorials/get-started.md — Run the TUI in 5 minutes
+- /docs/tutorials/first-agent.md — Build your first custom agent
+- /docs/tutorials/add-provider.md — Add a new LLM provider
+- /docs/how-to/add-theme.md — Add a colour theme
+- /docs/how-to/add-skill.md — Add an agent skill
+- /docs/how-to/add-provider.md — Provider checklist (quick reference)
+- /docs/how-to/debug-tui.md — Debug TUI rendering bugs
+- /docs/reference/cli.md — CLI flags and keyboard shortcuts
+- /docs/reference/config.md — All environment variables
+- /docs/reference/api.md — Go package API reference
+- /docs/reference/themes.md — Theme index and palette fields
+- /docs/reference/providers.md — Provider package reference
+- /docs/explanation/architecture.md — Architecture overview and data flow
+- /docs/explanation/tui-rendering.md — TUI rendering deep-dive
+- /docs/explanation/failover.md — Failover design and trade-offs
+- /docs/adr/ADR-0001-adk-as-agent-layer.md — Why ADK (not Genkit flows)
+- /docs/adr/ADR-0002-genkit-compat-oai.md — Genkit used only for oaibridge
+- /docs/adr/ADR-0003-failover-buffered.md — Buffered failover rationale
+- /docs/adr/ADR-0004-lipgloss-join-vertical.md — Why JoinVertical was removed
+- /docs/adr/ADR-0005-provider-config-pattern.md — Config struct pattern
+
+## Source
+
+- /cmd/tui/main.go — TUI entry point, Cobra subcommands, provider registration
+- /cmd/tui/chat.go — Bubbletea model, themes, rendering (fillLines, paintLines)
+- /cmd/tui/markdown.go — Glamour Markdown style configs per theme
+- /cmd/tui/slash.go — Slash command autocomplete
+- /cmd/tui/model_picker.go — /model provider/model picker overlay
+- /cmd/tui/settings.go — /settings overlay
+- /cmd/tui/session.go — Session persistence
+- /model/catalog/catalog.go — ModelEntry, ProviderCatalog, global registry
+- /model/failover/failover.go — Multi-provider failover chain
+- /model/oaibridge/bridge.go — Genkit compat_oai → ADK model.LLM bridge
+- /model/echo/echo.go — Echo model (testing)
+- /model/groq/groq.go — Groq provider
+- /model/githubmodels/ — GitHub Models provider
+- /model/nvidia/ — NVIDIA NIM provider
+- /model/openrouter/ — OpenRouter provider
+- /model/huggingface/ — Hugging Face provider
+- /agents/llmauditor.go — LLM output auditor agent
+- /agents/collaboration/ — Multi-agent collaboration patterns
+- /tool/skilltoolset/skilltoolset.go — Skill SKILL.md loader as ADK toolset
+- /skills/ — Agent skill SKILL.md files (agents, collaboration, design, engineering)
+- /sample/ — Usage examples (groq, openrouter, opencodezen)

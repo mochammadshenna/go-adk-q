@@ -404,6 +404,62 @@ func fillLines(content string, w int, bgStyle lipgloss.Style) string {
 	return sb.String()
 }
 
+// paintLines re-renders every line in content so that the theme background
+// colour is preserved even when the source content (e.g. textarea.View())
+// contains ANSI reset sequences (\e[0m) that would otherwise drop back to the
+// terminal default (black).
+//
+// Strategy: after every \e[0m in the stream re-inject the bg ANSI sequence so
+// it is never lost.  For dark themes bgStyle has no Background and bgSeq is
+// "", making this a no-op string replacement.
+func paintLines(content string, w int, bgStyle lipgloss.Style) string {
+	if w <= 0 {
+		return content
+	}
+
+	// Derive the bare ANSI bg sequence from bgStyle, e.g. "\e[48;2;255;255;255m".
+	// Render a single space: if bgStyle has a background the result will be
+	// "<bgSeq> <resetSeq>"; if not it will just be " ".
+	bgSeq := ""
+	if probe := bgStyle.Render(" "); probe != " " {
+		// Extract the prefix before the space character.
+		if idx := strings.Index(probe, " "); idx > 0 {
+			bgSeq = probe[:idx]
+		}
+	}
+
+	reset := "\x1b[0m"
+	replacement := reset + bgSeq
+
+	lines := strings.Split(content, "\n")
+	var sb strings.Builder
+	sb.Grow(len(content) + len(lines)*(len(bgSeq)+8))
+	for i, line := range lines {
+		// Start each line with the bg sequence so even the first cell is painted.
+		if bgSeq != "" {
+			sb.WriteString(bgSeq)
+		}
+		// Replace every reset with reset+bgSeq so bg survives resets mid-line.
+		if bgSeq != "" {
+			sb.WriteString(strings.ReplaceAll(line, reset, replacement))
+		} else {
+			sb.WriteString(line)
+		}
+		// Pad to full width with bg-coloured spaces.
+		lw := lipgloss.Width(line)
+		if pad := w - lw; pad > 0 {
+			if bgSeq != "" {
+				sb.WriteString(bgSeq)
+			}
+			sb.WriteString(strings.Repeat(" ", pad))
+		}
+		if i < len(lines)-1 {
+			sb.WriteByte('\n')
+		}
+	}
+	return sb.String()
+}
+
 // labelLine renders "Label           HH:MM" with the timestamp right-aligned
 // to fullW columns.  Padding spaces are rendered with bgStyle so that on light
 // themes the entire row carries the theme background colour.
@@ -1081,25 +1137,25 @@ func (m chatModel) View() string {
 	m.viewport.Style = s.viewBg
 
 	if m.settingsMode {
-		return lipgloss.JoinVertical(lipgloss.Left,
+		return strings.Join([]string{
 			m.headerView(s),
 			m.settingsView(),
 			m.settingsFooter(s),
-		)
+		}, "\n")
 	}
 	if m.modelPickerMode {
-		return lipgloss.JoinVertical(lipgloss.Left,
+		return strings.Join([]string{
 			m.headerView(s),
 			m.viewport.View(),
 			m.footerView(s),
-		)
+		}, "\n")
 	}
 	if m.themePickerMode {
-		return lipgloss.JoinVertical(lipgloss.Left,
+		return strings.Join([]string{
 			m.headerView(s),
 			m.viewport.View(),
 			m.footerView(s),
-		)
+		}, "\n")
 	}
 	slashMenu := m.slashMenuViewIfVisible(s)
 	parts := []string{m.headerView(s), m.viewport.View()}
@@ -1107,7 +1163,7 @@ func (m chatModel) View() string {
 		parts = append(parts, slashMenu)
 	}
 	parts = append(parts, m.inputView(s), m.footerView(s))
-	return lipgloss.JoinVertical(lipgloss.Left, parts...)
+	return strings.Join(parts, "\n")
 }
 
 // ── Sub-views ─────────────────────────────────────────────────────────────────
@@ -1121,17 +1177,11 @@ func (m chatModel) headerView(s styledSet) string {
 		Padding(0, 1).
 		Render("Connected")
 
-	inner := m.width - 2
-	pad := inner - lipgloss.Width(connected)
-	if pad < 0 {
-		pad = 0
-	}
-	fill := lipgloss.NewStyle().
-		Background(s.header.GetBackground()).
-		Render(strings.Repeat(" ", pad))
-
-	return lipgloss.NewStyle().Width(m.width).Background(s.header.GetBackground()).
-		Render(connected + fill)
+	// Build a bg-fill style using the header's chrome colour, then use
+	// fillLines to pad to m.width without plain-space gaps (which appear as
+	// terminal-default black on light themes).
+	headerBg := lipgloss.NewStyle().Background(s.header.GetBackground())
+	return fillLines(connected, m.width, headerBg)
 }
 
 func (m chatModel) slashMenuViewIfVisible(s styledSet) string {
@@ -1147,7 +1197,20 @@ func (m chatModel) inputView(s styledSet) string {
 	// Wrap the textarea in a rounded border box colored with the accent color.
 	// Width is set to fill the terminal; the textarea was already sized to
 	// leave room for the 4-char box overhead (2 borders + 2 padding).
-	box := s.inputBox.Width(m.width - 2).Render(m.textInput.View())
+	//
+	// textarea.View() returns Base.Render(viewport.View()). The viewport pads
+	// lines to width and height using lipgloss.NewStyle() (no bg), and
+	// Base.Background cannot repaint already-rendered interior cells with ANSI
+	// resets. The output is therefore pre-padded plain-space lines with no bg.
+	//
+	// paintLines re-renders each line wrapped in chromeBg so every cell —
+	// including lines that are already full-width spaces — gets the theme bg.
+	//
+	// Inner width = SetWidth arg (m.width-6): no prompt + no Base frame means
+	// textarea internal m.width = SetWidth arg exactly.
+	innerW := m.width - 6
+	taView := paintLines(m.textInput.View(), innerW, s.chromeBg)
+	box := s.inputBox.Width(m.width - 2).Render(taView)
 	return box
 }
 
@@ -1237,8 +1300,10 @@ func (m chatModel) footerView(s styledSet) string {
 	}
 
 	// Pad both lines to full terminal width so no dark strip appears on light themes.
-	line1 = s.chromeBg.Width(m.width).Render(line1)
-	line2 = s.chromeBg.Width(m.width).Render(line2)
+	// fillLines appends bg-coloured spaces rather than plain ones (Width().Render()
+	// uses plain spaces which show as terminal-default black on light themes).
+	line1 = fillLines(line1, m.width, s.chromeBg)
+	line2 = fillLines(line2, m.width, s.chromeBg)
 
 	return line1 + "\n" + line2
 }
@@ -1257,7 +1322,8 @@ func (m chatModel) settingsView() string {
 // settingsFooter renders a one-line hint bar shown below the settings form.
 func (m chatModel) settingsFooter(s styledSet) string {
 	hint := "enter/space: select  •  ↑/↓: navigate  •  esc: cancel  •  ctrl+c: quit"
-	return s.help.Width(m.width).MaxWidth(m.width).Render(hint)
+	rendered := s.help.MaxWidth(m.width).Render(hint)
+	return fillLines(rendered, m.width, s.chromeBg)
 }
 
 // ── Viewport content ──────────────────────────────────────────────────────────
@@ -1275,7 +1341,24 @@ func (m chatModel) settingsFooter(s styledSet) string {
 // those cells expose terminal-default (black).  By pre-filling here we ensure
 // every stored line is already full-width with the correct bg.
 func (m *chatModel) setViewportContent(s styledSet, content string) {
-	m.viewport.SetContent(fillLines(content, m.width, s.chromeBg))
+	// Fill every line to m.width so trailing cells carry the theme bg colour
+	// (the viewport's inner lipgloss.NewStyle().Width() pads with no bg).
+	filled := fillLines(content, m.width, s.chromeBg)
+
+	// The viewport pads short content to its Height with blank lines rendered
+	// by lipgloss.NewStyle().Height() — no bg, so they appear terminal-default
+	// (black) on light themes. Pre-pad the content ourselves so the viewport
+	// sees enough lines and adds none of its own.
+	if m.viewport.Height > 0 {
+		lineCount := strings.Count(filled, "\n") + 1
+		if lineCount < m.viewport.Height {
+			blank := s.chromeBg.Render(strings.Repeat(" ", m.width))
+			extra := strings.Repeat("\n"+blank, m.viewport.Height-lineCount)
+			filled += extra
+		}
+	}
+
+	m.viewport.SetContent(filled)
 }
 
 
@@ -1488,7 +1571,10 @@ func (m chatModel) helpView(s styledSet) string {
 			Padding(0, 1).
 			Render(marker + " " + t.name)
 	}
-	sb.WriteString("  " + strings.Join(badges, "  ") + "\n\n")
+	// Gaps between badges must carry the chrome background so they don't show
+	// terminal-default (black) on light themes.
+	gap := s.chromeBg.Render("  ")
+	sb.WriteString(gap + strings.Join(badges, gap) + "\n\n")
 	sb.WriteString(s.system.Render("  /theme to cycle  •  /settings for full settings  •  /help or esc to close") + "\n")
 
 	return sb.String()

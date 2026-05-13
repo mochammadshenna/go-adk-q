@@ -189,6 +189,11 @@ func main() {
 	}
 
 	// OpenRouter — optional; enabled when OPENROUTER_API_KEY is set.
+	// Only one model is registered here. Adding more free OpenRouter models
+	// does not help when they share the same upstream provider (e.g. Venice)
+	// which rate-limits by IP/key regardless of model name. Use a different
+	// provider key (GROQ_API_KEY, OPENCODE_API_KEY, GOOGLE_API_KEY) for real
+	// failover resilience.
 	var openrouterLLM model.LLM
 	if orCfg := openrouter.ConfigFromEnv(); orCfg.APIKey != "" {
 		if orCfg.SiteURL == "" {
@@ -223,7 +228,7 @@ func main() {
 	// Require at least one provider.
 	if len(candidateLLMs) == 0 {
 		log.Fatal("no model providers configured — set at least one of: " +
-			"GITHUB_PAT, GOOGLE_API_KEY, GROQ_API_KEY, NVIDIA_API_KEY, OPENROUTER_API_KEY, HF_TOKEN")
+			"GITHUB_PAT, GOOGLE_API_KEY, GROQ_API_KEY, NVIDIA_API_KEY, OPENROUTER_API_KEY, OPENCODE_API_KEY, HF_TOKEN")
 	}
 
 	// PROVIDER_SELECTED moves the named provider to the front of the chain.

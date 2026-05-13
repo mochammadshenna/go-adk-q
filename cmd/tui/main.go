@@ -42,6 +42,7 @@ import (
 	"go-adk-q/model/groq"
 	"go-adk-q/model/huggingface"
 	"go-adk-q/model/nvidia"
+	"go-adk-q/model/opencode"
 	"go-adk-q/model/openrouter"
 	"go-adk-q/tools"
 )
@@ -76,6 +77,7 @@ func init() {
 	catalog.Register(groq.KnownModels)
 	catalog.Register(nvidia.KnownModels)
 	catalog.Register(openrouter.KnownModels)
+	catalog.Register(opencode.KnownModels)
 	catalog.Register(huggingface.KnownModels)
 }
 
@@ -140,11 +142,11 @@ func init() {
 //
 // Valid values (case-insensitive):
 //
-//	github, gemini, groq, nvidia, openrouter, huggingface, echo
+//	github, gemini, groq, nvidia, openrouter, opencode, huggingface, echo
 //
 // Example:
 //
-//	export PROVIDER_SELECTED=openrouter
+//	export PROVIDER_SELECTED=opencode
 func applyProviderSelected(llms []model.LLM) []model.LLM {
 	sel := strings.ToLower(strings.TrimSpace(os.Getenv("PROVIDER_SELECTED")))
 	if sel == "" || len(llms) <= 1 {
@@ -225,10 +227,24 @@ func buildRunner(ctx context.Context) (*runner.Runner, session.Service, memory.S
 	}
 
 	// OpenRouter — enabled when OPENROUTER_API_KEY is set.
+	// One model only. Adding more free OpenRouter models with the same key
+	// does not help — they share the same upstream (e.g. Venice) which
+	// rate-limits by IP/key. For real failover use a different provider key:
+	// GROQ_API_KEY, OPENCODE_API_KEY, or GOOGLE_API_KEY.
 	if cfg := openrouter.ConfigFromEnv(); cfg.APIKey != "" {
 		m, err := openrouter.NewModel(ctx, cfg)
 		if err != nil {
 			return nil, nil, nil, "", fmt.Errorf("openrouter: %w", err)
+		}
+		candidateLLMs = append(candidateLLMs, m)
+	}
+
+	// OpenCode — enabled when OPENCODE_API_KEY is set.
+	// Provides free-tier models via https://opencode.ai/zen/v1.
+	if cfg := opencode.ConfigFromEnv(); cfg.APIKey != "" {
+		m, err := opencode.NewModel(ctx, cfg)
+		if err != nil {
+			return nil, nil, nil, "", fmt.Errorf("opencode: %w", err)
 		}
 		candidateLLMs = append(candidateLLMs, m)
 	}
@@ -251,7 +267,7 @@ func buildRunner(ctx context.Context) (*runner.Runner, session.Service, memory.S
 	if len(candidateLLMs) == 0 {
 		return nil, nil, nil, "", fmt.Errorf(
 			"no model providers configured — set at least one of: " +
-				"GITHUB_PAT, GOOGLE_API_KEY, GROQ_API_KEY, NVIDIA_API_KEY, OPENROUTER_API_KEY, HF_TOKEN",
+				"GITHUB_PAT, GOOGLE_API_KEY, GROQ_API_KEY, NVIDIA_API_KEY, OPENROUTER_API_KEY, OPENCODE_API_KEY, HF_TOKEN",
 		)
 	}
 
@@ -469,6 +485,14 @@ func newModelForEntry(ctx context.Context, providerID, modelID string) (model.LL
 		}
 		cfg.ModelName = modelID
 		return openrouter.NewModel(ctx, cfg)
+
+	case "opencode":
+		cfg := opencode.ConfigFromEnv()
+		if cfg.APIKey == "" {
+			return nil, fmt.Errorf("OPENCODE_API_KEY not set")
+		}
+		cfg.ModelName = modelID
+		return opencode.NewModel(ctx, cfg)
 
 	case "huggingface":
 		cfg := huggingface.ConfigFromEnv()
