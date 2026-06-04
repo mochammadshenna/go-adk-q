@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"log/slog"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,6 +15,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/charmbracelet/bubbles/filepicker"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textarea"
@@ -518,6 +521,214 @@ func copyToClipboard(text string) error {
 	return cmd.Run()
 }
 
+// processInputForFilesAndTags processes user input to handle file attachments (@path) and tags (#tag)
+// processInputForFilesAndTags scans the input for @path/to/file tokens and
+// #tag tokens.  It returns:
+//   - processedText: the message with @path replaced by "[Attached: filename]"
+//   - filePaths:     resolved file paths (NOT contents) for every readable @path
+//   - missingPaths:  @path tokens whose file could NOT be found (shown as warning)
+//   - tags:          list of #tag values
+func processInputForFilesAndTags(input string) (processedText string, filePaths []string, missingPaths []string, tags []string) {
+	var messageText strings.Builder
+
+	words := strings.Fields(input)
+	for _, word := range words {
+		if strings.HasPrefix(word, "@") && len(word) > 1 {
+			filePath := strings.TrimPrefix(word, "@")
+			if _, err := os.Stat(filePath); err == nil {
+				filePaths = append(filePaths, filePath)
+				messageText.WriteString("[Attached: " + filepath.Base(filePath) + "] ")
+			} else {
+				// File not found — record for error display and keep raw token.
+				missingPaths = append(missingPaths, filePath)
+				messageText.WriteString(word + " ")
+			}
+		} else if strings.HasPrefix(word, "#") && len(word) > 1 {
+			tag := strings.TrimPrefix(word, "#")
+			tags = append(tags, tag)
+			messageText.WriteString("#" + tag + " ")
+		} else {
+			messageText.WriteString(word + " ")
+		}
+	}
+
+	result := strings.TrimSpace(messageText.String())
+	if result == "" {
+		result = input
+	}
+	return result, filePaths, missingPaths, tags
+}
+
+// ── @ file autocomplete ────────────────────────────────────────────────────────
+
+// skipAtFileDirs is the set of directory names always excluded when scanning
+// the repository for file suggestions.
+var skipAtFileDirs = map[string]bool{
+	".git": true, ".hg": true, ".svn": true,
+	"node_modules": true, "vendor": true, ".vendor": true,
+	"dist": true, "build": true, "out": true, "bin": true,
+	".cache": true, "__pycache__": true, ".venv": true, "venv": true,
+	".idea": true, ".vscode": true,
+}
+
+// loadAtFileItems walks cwd up to depth 5 and returns all non-directory
+// file paths as paths relative to cwd.  Hidden files/dirs (leading dot)
+// and skipAtFileDirs are excluded.  Returns at most 1 000 entries.
+func loadAtFileItems(cwd string) []string {
+	const maxItems = 1000
+	const maxDepth = 5
+	var items []string
+
+	_ = filepath.WalkDir(cwd, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		rel, relErr := filepath.Rel(cwd, path)
+		if relErr != nil || rel == "." {
+			return nil
+		}
+		name := d.Name()
+		// Skip hidden files and excluded directories.
+		if strings.HasPrefix(name, ".") || skipAtFileDirs[name] {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if d.IsDir() {
+			// Enforce depth limit.
+			depth := strings.Count(rel, string(filepath.Separator)) + 1
+			if depth >= maxDepth {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		items = append(items, rel)
+		if len(items) >= maxItems {
+			return fs.SkipAll
+		}
+		return nil
+	})
+	return items
+}
+
+// filterAtFileItems returns up to maxShow items from items whose path
+// contains filter (case-insensitive).  When filter is empty the first
+// maxShow items are returned, with top-level files listed first.
+func filterAtFileItems(items []string, filter string) []string {
+	const maxShow = 14
+	if filter == "" {
+		// Surface top-level files before nested ones.
+		var top, rest []string
+		for _, it := range items {
+			if !strings.Contains(it, string(filepath.Separator)) {
+				top = append(top, it)
+			} else {
+				rest = append(rest, it)
+			}
+		}
+		all := append(top, rest...)
+		if len(all) > maxShow {
+			return all[:maxShow]
+		}
+		return all
+	}
+	lower := strings.ToLower(filter)
+	var out []string
+	for _, it := range items {
+		if strings.Contains(strings.ToLower(it), lower) {
+			out = append(out, it)
+			if len(out) >= maxShow {
+				break
+			}
+		}
+	}
+	return out
+}
+
+// extractAtFilter detects whether the textarea value ends with an
+// \"@<filter>\" token (no trailing space) and returns the filter text.
+// Used to decide whether to open the @ autocomplete menu.
+func extractAtFilter(val string) (filter string, found bool) {
+	if val == "" {
+		return "", false
+	}
+	// Find the last @ in the value.
+	idx := strings.LastIndex(val, "@")
+	if idx < 0 {
+		return "", false
+	}
+	after := val[idx+1:]
+	// If there is any whitespace after the @, the token is finished.
+	if strings.ContainsAny(after, " \t\n") {
+		return "", false
+	}
+	return after, true
+}
+
+// replaceAtFilter replaces the last \"@<filter>\" token in val with
+// \"@selectedFile\", preserving everything before the @.
+func replaceAtFilter(val, selectedFile string) string {
+	idx := strings.LastIndex(val, "@")
+	if idx < 0 {
+		return val + "@" + selectedFile
+	}
+	before := val[:idx]
+	after := val[idx+1:]
+	// Drop the partial filter (everything up to next space or end).
+	if spaceIdx := strings.IndexAny(after, " \t\n"); spaceIdx >= 0 {
+		return before + "@" + selectedFile + after[spaceIdx:]
+	}
+	return before + "@" + selectedFile
+}
+
+// atFileMenuView renders the @ file autocomplete popup, styled like the
+// slash command menu.  It floats just above the input separator.
+func atFileMenuView(s styledSet, items []string, selectedIdx int, filter string, w int) string {
+	if len(items) == 0 {
+		return ""
+	}
+	if selectedIdx < 0 {
+		selectedIdx = 0
+	}
+	if selectedIdx >= len(items) {
+		selectedIdx = len(items) - 1
+	}
+
+	boxStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(s.sep.GetForeground()).
+		Width(w - 2)
+
+	rowW := w - 4
+	if rowW < 12 {
+		rowW = 12
+	}
+
+	// Header: show the current filter and item count.
+	var sb strings.Builder
+	headerText := fmt.Sprintf("  📂 @%s  •  %d file(s)  •  ↑↓ navigate  •  tab: select  •  esc: cancel", filter, len(items))
+	sb.WriteString(s.system.Width(rowW).Render(headerText) + "\n")
+
+	for i, item := range items {
+		// Truncate long paths so the row fits.
+		display := item
+		if lipgloss.Width(display) > rowW-4 {
+			display = "…" + display[len(display)-(rowW-5):]
+		}
+		row := "  " + display
+		if i == selectedIdx {
+			sb.WriteString(s.prompt.Width(rowW).Render(row))
+		} else {
+			sb.WriteString(s.system.Width(rowW).Render(row))
+		}
+		if i < len(items)-1 {
+			sb.WriteByte('\n')
+		}
+	}
+	return boxStyle.Render(sb.String()) + "\n"
+}
+
 // smartCopy picks what to copy from an agent reply:
 //   - If the text contains one or more code fences, the body of the first
 //     fence is copied (without the ``` delimiters).
@@ -565,6 +776,13 @@ type switchModelMsg struct {
 	newRunner    *runner.Runner
 	newModelName string
 	err          error
+}
+
+// filePickerState wraps bubbles/filepicker for the /filepicker overlay.
+// Use /filepicker to browse and attach files; ESC or back-navigation cancels.
+type filePickerState struct {
+	fp      filepicker.Model
+	showing bool
 }
 
 // ── Bubbletea model ───────────────────────────────────────────────────────────
@@ -618,6 +836,12 @@ type chatModel struct {
 	// Slash command autocomplete menu.
 	slashMenuIdx int // selected row in the menu (-1 = none)
 
+	// @ file autocomplete menu — activated when input ends with @<filter>.
+	atFileActive bool     // menu is open
+	atFileIdx    int      // currently highlighted row
+	atFileItems  []string // all files cached from atFileCwd
+	atFileCwd    string   // CWD when atFileItems was built
+
 	// Settings overlay (huh form).
 	settingsMode      bool
 	settingsForm      *huh.Form
@@ -632,6 +856,18 @@ type chatModel struct {
 	// Theme picker overlay (/theme command).
 	themePickerMode bool
 	themePickerIdx  int // highlighted row in theme picker
+
+	// File picker overlay (bubbles/filepicker).
+	filePickerMode  bool
+	filePickerState filePickerState
+	// selectedFiles are files chosen via /filepicker or @path that will be
+	// appended as context to the next message sent to the agent.
+	selectedFiles []string
+
+	// cancelFn cancels the in-flight agent request goroutine.
+	// nil when no request is running.  Call it (then nil it) to interrupt.
+	cancelFn context.CancelFunc
+
 
 	// activeProviderIDs are the provider name substrings from the failover
 	// chain, used to filter the /model picker to only configured providers.
@@ -766,6 +1002,7 @@ func (m chatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.viewport.Width = wm.Width
 			m.viewport.Height = vpH
+			invalidateRendererCache() // word-wrap width changed
 			m.applyThemeToTextarea() // refresh Base.Width after resize
 			m.refreshViewport()
 		}
@@ -802,6 +1039,33 @@ func (m chatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.themePickerMode {
 		return m.updateThemePicker(msg)
 	}
+
+	// ── File picker overlay intercepts all events when open ──────────────
+	if m.filePickerMode {
+		// ESC or back key closes the picker without a selection.
+		if km, ok := msg.(tea.KeyMsg); ok {
+			if km.String() == "ctrl+c" {
+				return m, tea.Quit
+			}
+			if km.String() == "esc" {
+				m.filePickerMode = false
+				m.filePickerState.showing = false
+				return m, nil
+			}
+		}
+		var fpCmd tea.Cmd
+		m.filePickerState.fp, fpCmd = m.filePickerState.fp.Update(msg)
+		if ok, path := m.filePickerState.fp.DidSelectFile(msg); ok {
+			m.selectedFiles = append(m.selectedFiles, path)
+			m.statusMsg = fmt.Sprintf("📎 Attached: %s (send a message to include it)", filepath.Base(path))
+			cmds = append(cmds, oneShotTimer(4*time.Second, statusClearMsg{}))
+			m.filePickerMode = false
+			m.filePickerState.showing = false
+			return m, tea.Batch(fpCmd, tea.Batch(cmds...))
+		}
+		return m, fpCmd
+	}
+
 	switch msg := msg.(type) {
 
 	// ── Keyboard ──────────────────────────────────────────────────────────
@@ -821,16 +1085,28 @@ func (m chatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch {
 		case msg.err != nil:
 			m.loading = false
-			m.msgs = append(m.msgs, chatMsg{
-				role: "error",
-				text: msg.err.Error(),
-				at:   time.Now(),
-			})
+			m.cancelFn = nil
+			if errors.Is(msg.err, context.Canceled) {
+				// User interrupted — preserve any partial text.
+				if strings.TrimSpace(m.streamingText) != "" {
+					partial := strings.TrimSpace(m.streamingText) + "\n\n*⛔ interrupted*"
+					m.msgs = append(m.msgs, chatMsg{role: "agent", text: partial, at: time.Now()})
+				} else {
+					m.msgs = append(m.msgs, chatMsg{role: "system", text: "⛔ Request interrupted.", at: time.Now()})
+				}
+			} else {
+				m.msgs = append(m.msgs, chatMsg{
+					role: "error",
+					text: msg.err.Error(),
+					at:   time.Now(),
+				})
+			}
 			m.streamingText = ""
 			m.refreshViewport()
 
 		case msg.done:
 			m.loading = false
+			m.cancelFn = nil
 			text := strings.TrimSpace(m.streamingText)
 			if text == "" {
 				text = "(no response)"
@@ -839,10 +1115,7 @@ func (m chatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.streamingText = ""
 			m.totalPromptTokens += msg.promptTokens
 			m.totalCandidateTokens += msg.candidateTokens
-			// Scroll to the START of the completed reply so long responses
-			// (code blocks, lists) are visible from the top rather than being
-			// scrolled past with only the last few lines in view.
-			m.refreshViewportShowLast()
+			m.refreshViewport()
 
 		default:
 			m.streamingText += msg.text
@@ -882,8 +1155,9 @@ func (m chatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
-		if m.loading && m.streamingText == "" {
+		if m.loading {
 			cmds = append(cmds, cmd)
+			m.refreshViewport() // redraw viewport so ⠋ Thinking… frame advances
 		}
 	} // end switch msg.(type)
 
@@ -1157,10 +1431,32 @@ func (m chatModel) View() string {
 			m.footerView(s),
 		}, "\n")
 	}
+	if m.filePickerMode {
+		// Render the bubbles/filepicker overlay with header and a brief hint.
+		title := s.agentLabel.Render(" 📂 Select a file to attach")
+		hint := s.system.Render("  ↑/↓ navigate  •  enter: select  •  h/backspace: go up  •  esc: cancel")
+		var attachInfo string
+		if len(m.selectedFiles) > 0 {
+			attachInfo = s.prompt.Render(fmt.Sprintf("  📎 %d file(s) pending attachment", len(m.selectedFiles)))
+		}
+		body := title + "\n" + hint + "\n"
+		if attachInfo != "" {
+			body += attachInfo + "\n"
+		}
+		body += "\n" + m.filePickerState.fp.View()
+		return strings.Join([]string{
+			m.headerView(s),
+			body,
+		}, "\n")
+	}
 	slashMenu := m.slashMenuViewIfVisible(s)
+	atFileMenu := m.atFileMenuViewIfVisible(s)
 	parts := []string{m.headerView(s), m.viewport.View()}
 	if slashMenu != "" {
 		parts = append(parts, slashMenu)
+	}
+	if atFileMenu != "" {
+		parts = append(parts, atFileMenu)
 	}
 	parts = append(parts, m.inputView(s), m.footerView(s))
 	return strings.Join(parts, "\n")
@@ -1191,6 +1487,19 @@ func (m chatModel) slashMenuViewIfVisible(s styledSet) string {
 	}
 	matches := slashMatches(val)
 	return slashMenuView(s, matches, m.slashMenuIdx, m.width)
+}
+
+// atFileMenuViewIfVisible renders the @ file autocomplete dropdown when active.
+func (m chatModel) atFileMenuViewIfVisible(s styledSet) string {
+	if !m.atFileActive {
+		return ""
+	}
+	filter, _ := extractAtFilter(m.textInput.Value())
+	items := filterAtFileItems(m.atFileItems, filter)
+	if len(items) == 0 {
+		return ""
+	}
+	return atFileMenuView(s, items, m.atFileIdx, filter, m.width)
 }
 
 func (m chatModel) inputView(s styledSet) string {
@@ -1260,28 +1569,26 @@ func (m chatModel) footerView(s styledSet) string {
 	scrollRendered := bg(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#f9e2af"))).
 		Render(scrollIndicator)
 
+	hintW := m.width - counterW - scrollW
+	if hintW < 1 {
+		hintW = 1
+	}
+
 	// ── Hint text ─────────────────────────────────────────────────────────
 	var hint string
 	switch {
 	case m.statusMsg != "":
 		hint = "✓ " + m.statusMsg
 	case m.loading:
-		hint = m.spinner.View() + " Thinking…  •  ctrl+c: quit"
+		// Show interrupt hint so user knows they can cancel.
+		hint = "ctrl+c / esc: interrupt"
+	case len(m.selectedFiles) > 0:
+		hint = fmt.Sprintf("📎 %d file(s) ready  •  /filepicker: add more  •  ctrl+c: quit", len(m.selectedFiles))
 	default:
-		hint = "enter: send  •  ↑/↓: scroll  •  / for commands  •  ctrl+t: copy mode  •  ctrl+c: quit"
+		hint = "↑/↓: history/scroll  •  @path: attach  •  / for commands  •  ctrl+c: quit"
 	}
 
-	hintW := m.width - counterW - scrollW
-	if hintW < 1 {
-		hintW = 1
-	}
-
-	var hintRendered string
-	if m.loading && m.statusMsg == "" {
-		hintRendered = bg(lipgloss.NewStyle()).Width(hintW).MaxWidth(hintW).Render(hint)
-	} else {
-		hintRendered = s.help.Width(hintW).MaxWidth(hintW).Render(hint)
-	}
+	hintRendered := s.help.Width(hintW).MaxWidth(hintW).Render(hint)
 
 	line1 := hintRendered + scrollRendered + counter
 
@@ -1344,20 +1651,12 @@ func (m *chatModel) setViewportContent(s styledSet, content string) {
 	// Fill every line to m.width so trailing cells carry the theme bg colour
 	// (the viewport's inner lipgloss.NewStyle().Width() pads with no bg).
 	filled := fillLines(content, m.width, s.chromeBg)
-
-	// The viewport pads short content to its Height with blank lines rendered
-	// by lipgloss.NewStyle().Height() — no bg, so they appear terminal-default
-	// (black) on light themes. Pre-pad the content ourselves so the viewport
-	// sees enough lines and adds none of its own.
-	if m.viewport.Height > 0 {
-		lineCount := strings.Count(filled, "\n") + 1
-		if lineCount < m.viewport.Height {
-			blank := s.chromeBg.Render(strings.Repeat(" ", m.width))
-			extra := strings.Repeat("\n"+blank, m.viewport.Height-lineCount)
-			filled += extra
-		}
-	}
-
+	// Note: do NOT pad filled to viewport.Height with blank lines here.
+	// The viewport's own Style (= s.viewBg, set in View()) wraps all rendered
+	// content — including the empty rows lipgloss.Height() adds — in the theme
+	// background.  Adding extra blank lines here causes GotoBottom to scroll
+	// PAST the actual content into the blank fill area, making responses look
+	// cropped when the content is shorter than the viewport height.
 	m.viewport.SetContent(filled)
 }
 
@@ -1532,22 +1831,28 @@ func (m chatModel) helpView(s styledSet) string {
 	sb.WriteString(s.userLabel.Render("Keyboard shortcuts") + "\n\n")
 
 	bindings := [][2]string{
-		{"enter", "Send message"},
+		{"enter", "Send message (with any attached files)"},
 		{"/settings", "Open settings overlay (theme, char limit)"},
 		{"/model", "Switch model or provider (2-level picker)"},
+		{"/filepicker", "Browse & attach files (bubbles filepicker)"},
+		{"/acp", "Start ACP server (Agent Client Protocol) for IDE integration"},
+		{"/acpstop", "Stop the ACP server"},
 		{"/help", "Toggle this help overlay"},
 		{"/clear", "Clear conversation history"},
 		{"/theme", "Cycle colour theme"},
 		{"/skills", "List available agent skills"},
-		{"↑ / ↓", "Browse sent message history"},
+		{"@path/to/file", "Inline attach a file — content sent as context"},
+		{"#tag", "Add a tag to your message"},
+		{"↑ / ctrl+p", "History: prev message (from empty OR with ctrl+p)"},
+		{"↓ / ctrl+n", "History: next message / restore draft"},
 		{"? / esc", "Toggle help (when input empty)"},
 		{"ctrl+l", "Clear conversation history"},
 		{"ctrl+s", "Save conversation → ~/.go-adk-q/session.json"},
 		{"ctrl+y", "Copy last agent reply to clipboard"},
-		{"shift+drag", "Select and copy any text (works natively, no mouse mode)"},
+		{"ctrl+t", "Toggle copy/scroll mode"},
+		{"shift+drag", "Select and copy any text (native; no mouse mode needed)"},
 		{"ctrl+c", "Quit"},
 		{"pgup / pgdn", "Scroll message history"},
-		{"↑ / ↓", "Scroll or browse input history"},
 	}
 	for _, b := range bindings {
 		k := s.prompt.Render(fmt.Sprintf("  %-16s", b[0]))
@@ -1630,7 +1935,9 @@ func (m chatModel) renderMessages(s styledSet) string {
 			sb.WriteString(s.errorText.PaddingLeft(2).Width(w).Render(wrapped) + "\n")
 
 		case "system":
-			sb.WriteString(s.system.PaddingLeft(2).Width(w).Render(msg.text) + "\n")
+			// System messages may contain markdown (announcements, skill lists, etc.)
+			// Use glamour so **bold**, `code`, lists etc. render properly.
+			sb.WriteString(renderMarkdown(s, msg.text, contentW, s.system))
 		}
 	}
 
@@ -1689,13 +1996,16 @@ func switchModelCmd(providerID, modelID string, sessionSvc session.Service, memo
 //	the accumulated string and only forwarding the delta.
 
 // startAgentStream starts the ADK runner in a background goroutine and returns
-// a tea.Cmd that will deliver the first streamChunkMsg to the Update loop.
-func (m chatModel) startAgentStream(input string) tea.Cmd {
+// a tea.Cmd that will deliver the first streamChunkMsg to the Update loop,
+// plus a cancel func that stops the goroutine (context.Canceled → interrupted).
+func (m chatModel) startAgentStream(input string) (tea.Cmd, context.CancelFunc) {
 	r := m.runner
 	userID := m.userID
 	sessionID := m.sessionID
 	sessionSvc := m.sessionSvc
 	memorySvc := m.memorySvc
+
+	ctx, cancel := context.WithCancel(context.Background())
 
 	// Buffered channel so the goroutine is never blocked by a slow UI frame.
 	ch := make(chan streamChunkMsg, 64)
@@ -1703,7 +2013,6 @@ func (m chatModel) startAgentStream(input string) tea.Cmd {
 	go func() {
 		defer close(ch)
 
-		ctx := context.Background()
 		content := &genai.Content{
 			Parts: []*genai.Part{{Text: input}},
 			Role:  genai.RoleUser,
@@ -1773,7 +2082,7 @@ func (m chatModel) startAgentStream(input string) tea.Cmd {
 		}
 	}()
 
-	return nextChunk(ch)
+	return nextChunk(ch), cancel
 }
 
 // nextChunk returns a tea.Cmd that reads one value from ch and embeds the
@@ -1789,6 +2098,46 @@ func nextChunk(ch <-chan streamChunkMsg) tea.Cmd {
 		}
 		return msg
 	}
+}
+
+// runAgentSync drives the ADK runner to completion and returns the full text
+// response as a string.  It mirrors startAgentStream but runs synchronously
+// on the calling goroutine — used by the ACP server bridge so that HTTP
+// handlers can call the agent without interacting with the BubbleTea loop.
+func runAgentSync(ctx context.Context, r *runner.Runner, userID, sessionID, input string) (string, error) {
+	content := &genai.Content{
+		Parts: []*genai.Part{{Text: input}},
+		Role:  genai.RoleUser,
+	}
+	var result strings.Builder
+	var accumulated string
+	for event, err := range r.Run(ctx, userID, sessionID, content, agent.RunConfig{}) {
+		if err != nil {
+			return "", err
+		}
+		// Bail immediately if the caller cancelled (HTTP disconnect / timeout).
+		if ctx.Err() != nil {
+			return strings.TrimSpace(result.String()), ctx.Err()
+		}
+		if event == nil || event.LLMResponse.Content == nil {
+			continue
+		}
+		for _, part := range event.LLMResponse.Content.Parts {
+			if part.Text == "" {
+				continue
+			}
+			if strings.HasPrefix(part.Text, accumulated) {
+				if delta := part.Text[len(accumulated):]; delta != "" {
+					result.WriteString(delta)
+					accumulated = part.Text
+				}
+			} else {
+				result.WriteString(part.Text)
+				accumulated += part.Text
+			}
+		}
+	}
+	return strings.TrimSpace(result.String()), nil
 }
 
 // ── Entry point ───────────────────────────────────────────────────────────────
@@ -1858,14 +2207,91 @@ func parseProviderIDs(modelName string) []string {
 // re-focusing the textarea if needed.
 func (m chatModel) handleKey(msg tea.KeyMsg) (chatModel, tea.Cmd) {
 	var cmds []tea.Cmd
+
+	// ── @ file autocomplete menu — intercept navigation keys ────────────────
+	// Must run before the generic key switch so ↑/↓/Tab/Esc go to the menu
+	// and not to history navigation or the textarea when the menu is open.
+	if m.atFileActive {
+		filter, _ := extractAtFilter(m.textInput.Value())
+		filtered := filterAtFileItems(m.atFileItems, filter)
+		switch msg.String() {
+		case "ctrl+c":
+			return m, tea.Quit
+		case "esc":
+			m.atFileActive = false
+			m.atFileIdx = 0
+			return m, nil
+		case "up", "ctrl+p":
+			if m.atFileIdx > 0 {
+				m.atFileIdx--
+			}
+			return m, nil
+		case "down", "ctrl+n":
+			if m.atFileIdx < len(filtered)-1 {
+				m.atFileIdx++
+			}
+			return m, nil
+		case "tab", "shift+tab":
+			// Tab cycles through items without closing the menu.
+			if msg.String() == "shift+tab" {
+				if m.atFileIdx > 0 {
+					m.atFileIdx--
+				}
+			} else {
+				if m.atFileIdx < len(filtered)-1 {
+					m.atFileIdx++
+				}
+			}
+			return m, nil
+		case "enter":
+			// Select the highlighted item and close the menu.
+			if len(filtered) > 0 {
+				idx := m.atFileIdx
+				if idx >= len(filtered) {
+					idx = 0
+				}
+				newVal := replaceAtFilter(m.textInput.Value(), filtered[idx])
+				m.textInput.SetValue(newVal)
+				m.textInput.CursorEnd()
+				if m.width > 6 {
+					m.textInput.SetHeight(calcInputHeight(m.textInput.Value(), m.width-6, 5))
+				}
+			}
+			m.atFileActive = false
+			m.atFileIdx = 0
+			return m, nil
+		default:
+			// Any other key (typing): let it fall through to normal key
+			// handling so the textarea gets updated and we re-filter.
+		}
+	}
+
 	switch msg.String() {
 
 	// ── ctrl+c: quit ──────────────────────────────────────────────
 	case "ctrl+c":
+		// ctrl+c while agent is running → interrupt the request.
+		// ctrl+c when idle → quit (standard shell behaviour).
+		if m.loading && m.cancelFn != nil {
+			m.cancelFn()
+			m.cancelFn = nil
+			return m, nil
+		}
 		return m, tea.Quit
 
-	// ── esc: dismiss help overlay ─────────────────────────────────
 	case "esc":
+		// esc while agent is running → interrupt (same as ctrl+c).
+		if m.loading && m.cancelFn != nil {
+			m.cancelFn()
+			m.cancelFn = nil
+			return m, nil
+		}
+		// Close @ file menu if open.
+		if m.atFileActive {
+			m.atFileActive = false
+			m.atFileIdx = 0
+			return m, nil
+		}
 		// Close slash menu if open.
 		if slashMenuVisible(m.textInput.Value()) {
 			m.textInput.Reset()
@@ -1945,8 +2371,8 @@ func (m chatModel) handleKey(msg tea.KeyMsg) (chatModel, tea.Cmd) {
 			return m, nil
 		}
 
-	// ── ↑: slash menu navigation OR input history ─────────────────
-	case "up":
+	// ── ↑ / ctrl+p : slash menu nav OR history browse (oldest first) ──────
+	case "up", "ctrl+p":
 		val := m.textInput.Value()
 		if slashMenuVisible(val) {
 			if m.slashMenuIdx > 0 {
@@ -1954,14 +2380,22 @@ func (m chatModel) handleKey(msg tea.KeyMsg) (chatModel, tea.Cmd) {
 			}
 			return m, nil
 		}
-		// History navigation only when the input box is empty.
-		if !m.loading && len(m.inputHistory) > 0 && val == "" {
+		// Enter history-browse mode:
+		//  • always when input is empty
+		//  • always when already browsing (historyIdx != -1)
+		//  • also on ctrl+p even when input has text (shell ctrl+p behaviour)
+		wantBrowse := !m.loading && len(m.inputHistory) > 0 &&
+			(m.historyIdx != -1 || val == "" || msg.String() == "ctrl+p")
+		if wantBrowse {
 			if m.historyIdx == -1 {
-				m.inputDraft = ""
+				// First entry — save the current draft so ctrl+n can restore it.
+				m.inputDraft = val
 				m.historyIdx = len(m.inputHistory) - 1
 			} else if m.historyIdx > 0 {
+				// Navigate toward the oldest entry.
 				m.historyIdx--
 			}
+			// At historyIdx==0: stay at the oldest entry (clamp; don't wrap).
 			m.textInput.SetValue(m.inputHistory[m.historyIdx])
 			m.textInput.CursorEnd()
 			if m.width > 6 {
@@ -1969,10 +2403,10 @@ func (m chatModel) handleKey(msg tea.KeyMsg) (chatModel, tea.Cmd) {
 			}
 			return m, nil
 		}
-		// Non-empty input or no history → fall through to textarea.
+		// Non-empty, not ctrl+p, not browsing → textarea handles cursor-up.
 
-	// ── ↓: slash menu navigation OR input history ────────────────
-	case "down":
+	// ── ↓ / ctrl+n : slash menu nav OR history forward (back to draft) ────
+	case "down", "ctrl+n":
 		val := m.textInput.Value()
 		if slashMenuVisible(val) {
 			matches := slashMatches(val)
@@ -1986,6 +2420,7 @@ func (m chatModel) handleKey(msg tea.KeyMsg) (chatModel, tea.Cmd) {
 				m.historyIdx++
 				m.textInput.SetValue(m.inputHistory[m.historyIdx])
 			} else {
+				// Past the end of history — restore the saved draft.
 				m.historyIdx = -1
 				m.textInput.SetValue(m.inputDraft)
 				m.inputDraft = ""
@@ -1996,7 +2431,7 @@ func (m chatModel) handleKey(msg tea.KeyMsg) (chatModel, tea.Cmd) {
 			}
 			return m, nil
 		}
-		// Not browsing → fall through to textarea.
+		// Not browsing → textarea handles cursor-down.
 
 	// ── tab: complete slash command ───────────────────────────────
 	case "tab":
@@ -2099,22 +2534,154 @@ func (m chatModel) handleKey(msg tea.KeyMsg) (chatModel, tea.Cmd) {
 			m.modelPickerMode = true
 			m.refreshViewportModelPicker()
 			return m, nil
-		}
+
+		case "/acp":
+			m.textInput.Reset()
+			acpServerMu.Lock()
+			defer acpServerMu.Unlock()
+			if acpServerInstance != nil {
+				m.statusMsg = fmt.Sprintf("🟢 ACP already running on port %d", acpServerInstance.Port())
+				cmds = append(cmds, oneShotTimer(3*time.Second, statusClearMsg{}))
+				return m, tea.Batch(cmds...)
+			}
+			// Capture runner + session at start time.  The ACP session is kept
+			// separate from the TUI session so concurrent requests don’t mix.
+			capturedRunner := m.runner
+			capturedUserID := m.userID
+			acpSessionID := "acp-" + m.sessionID
+			bridge := func(ctx context.Context, input string) (string, error) {
+				// Hard timeout: prevent runaway agent calls from blocking the HTTP handler forever.
+				ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
+				defer cancel()
+				return runAgentSync(ctx, capturedRunner, capturedUserID, acpSessionID, input)
+			}
+			srv := newACPServer(bridge)
+			if err := srv.Start(0); err != nil {
+				m.statusMsg = "ACP start failed: " + err.Error()
+			} else {
+				acpServerInstance = srv
+				m.msgs = append(m.msgs, chatMsg{
+					role: "system",
+					text: fmt.Sprintf("🟢 **ACP server started** on `http://127.0.0.1:%d/acp`\n\n"+
+						"Fully wired to the agent — `message/send` and `message/stream` call the real runner.\n"+
+						"Methods: `initialize` `session/create` `message/send` `message/stream` `ping`\n"+
+						"Stop with `/acpstop`.", srv.Port()),
+					at: time.Now(),
+				})
+				m.refreshViewport()
+			}
+			cmds = append(cmds, oneShotTimer(3*time.Second, statusClearMsg{}))
+			return m, tea.Batch(cmds...)
+
+		case "/acpstop":
+			m.textInput.Reset()
+			acpServerMu.Lock()
+			defer acpServerMu.Unlock()
+			if acpServerInstance == nil {
+				m.statusMsg = "ACP server is not running"
+			} else {
+				_ = acpServerInstance.Stop()
+				acpServerInstance = nil
+				m.statusMsg = "🔴 ACP server stopped"
+				m.msgs = append(m.msgs, chatMsg{
+					role: "system",
+					text: "🔴 ACP server stopped.",
+					at: time.Now(),
+				})
+				m.refreshViewport()
+			}
+			cmds = append(cmds, oneShotTimer(3*time.Second, statusClearMsg{}))
+			return m, tea.Batch(cmds...)
+
+		case "/filepicker":
+			m.textInput.Reset()
+			m.showHelp = false
+			cwd, _ := os.Getwd()
+			fp := filepicker.New()
+			fp.CurrentDirectory = cwd
+			fp.ShowHidden = false
+			fp.DirAllowed = false
+			fp.FileAllowed = true
+			fp.AutoHeight = false
+			fp.Height = m.height - 8
+			if fp.Height < 5 {
+				fp.Height = 5
+			}
+			m.filePickerState = filePickerState{
+				fp:      fp,
+				showing: true,
+			}
+			m.filePickerMode = true
+			return m, fp.Init()
+
+		} // end switch strings.ToLower(input) — no slash command matched
 
 		// Not a slash command — send to agent.
 		m.showHelp = false
+		// ── Process @path file attachments from inline text ────────────────────
+		processedInput, inlineAttachments, missingPaths, tags := processInputForFilesAndTags(input)
+		_ = tags // tags noted but not yet surfaced as metadata
+
+		// Warn about @paths that could not be resolved.
+		if len(missingPaths) > 0 {
+			cwd, _ := os.Getwd()
+			m.statusMsg = fmt.Sprintf("⚠️ File not found: %s — CWD is %s",
+				strings.Join(missingPaths, ", "), cwd)
+			cmds = append(cmds, oneShotTimer(6*time.Second, statusClearMsg{}))
+		}
+
+		// Merge /filepicker-selected files + inline @path files.
+		allAttachments := append(m.selectedFiles, inlineAttachments...)
+		m.selectedFiles = nil // clear after consumption
+
+		// Build the display message shown in the chat bubble.
+		var messageToSend string
+		if len(allAttachments) > 0 {
+			attachNames := make([]string, 0, len(allAttachments))
+			for _, a := range allAttachments {
+				attachNames = append(attachNames, filepath.Base(a))
+			}
+			messageToSend = processedInput + "\n\n📎 *Attached: " + strings.Join(attachNames, ", ") + "*"
+		} else {
+			messageToSend = processedInput
+		}
+
+		// Build the agent input: append file contents as fenced code blocks.
+		agentInput := processedInput
+		if len(allAttachments) > 0 {
+			var attachBuf strings.Builder
+			attachBuf.WriteString(processedInput)
+			for _, path := range allAttachments {
+				content, err := os.ReadFile(path)
+				if err != nil {
+					continue
+				}
+				ext := strings.TrimPrefix(filepath.Ext(path), ".")
+				if ext == "" {
+					ext = "text"
+				}
+				attachBuf.WriteString(fmt.Sprintf("\n\n--- File: %s ---\n```%s\n%s\n```", filepath.Base(path), ext, string(content)))
+			}
+			agentInput = attachBuf.String()
+		}
+
 		if len(m.inputHistory) == 0 || m.inputHistory[len(m.inputHistory)-1] != input {
 			m.inputHistory = append(m.inputHistory, input)
 		}
 		m.historyIdx = -1
 		m.inputDraft = ""
-		m.msgs = append(m.msgs, chatMsg{role: "user", text: input, at: time.Now()})
+		m.atFileActive = false // close @ menu on send
+		m.atFileIdx = 0
+		m.msgs = append(m.msgs, chatMsg{role: "user", text: messageToSend, at: time.Now()})
 		m.textInput.Reset()
 		m.loading = true
 		m.refreshViewport()
-		cmds = append(cmds, m.spinner.Tick, m.startAgentStream(input))
+		streamCmd, cancelFn := m.startAgentStream(agentInput)
+		m.cancelFn = cancelFn
+		cmds = append(cmds, m.spinner.Tick, streamCmd)
 		return m, tea.Batch(cmds...)
-	}
+
+	} // end case "enter" / end switch msg.String()
 
 	// All other keys (printable chars, backspace, arrows when input non-empty,
 	// etc.) are forwarded to the textarea widget so typing works normally.
@@ -2125,6 +2692,29 @@ func (m chatModel) handleKey(msg tea.KeyMsg) (chatModel, tea.Cmd) {
 	// Keep textarea height in sync with content.
 	if m.ready && m.width > 6 {
 		m.textInput.SetHeight(calcInputHeight(m.textInput.Value(), m.width-6, 5))
+	}
+
+	// ── @ file menu: activate / deactivate based on new textarea value ──────
+	if !m.loading {
+		val := m.textInput.Value()
+		_, hasAt := extractAtFilter(val)
+		if hasAt {
+			// Scan files once per working directory; reuse cache otherwise.
+			cwd, _ := os.Getwd()
+			if !m.atFileActive || m.atFileCwd != cwd {
+				m.atFileItems = loadAtFileItems(cwd)
+				m.atFileCwd = cwd
+				m.atFileIdx = 0
+			}
+			m.atFileActive = true
+			// Reset index when filter text changes so cursor stays at top.
+			m.atFileIdx = 0
+		} else {
+			if m.atFileActive {
+				m.atFileActive = false
+				m.atFileIdx = 0
+			}
+		}
 	}
 
 	return m, tea.Batch(cmds...)

@@ -23,6 +23,9 @@ var allSlashCmds = []slashCmd{
 	{"/help", "Toggle help overlay"},
 	{"/clear", "Clear conversation history"},
 	{"/skills", "List available agent skills"},
+	{"/filepicker", "Browse & attach files (bubbles filepicker)"},
+	{"/acp", "Start ACP server (Agent Client Protocol)"},
+	{"/acpstop", "Stop the running ACP server"},
 }
 
 // slashMatches returns the subset of allSlashCmds whose name has prefix as a
