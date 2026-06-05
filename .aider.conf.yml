@@ -1,0 +1,14 @@
+# Aider configuration for go-adk-q
+# Context files pre-loaded on every aider session.
+# Run: aider (from repo root)
+
+read:
+  - AGENTS.md
+  - llms-full.txt
+
+auto-commits: true
+commit-prompt: "Imperative present tense. Format: [type] description. Types: feat, fix, docs, refactor, test, chore."
+
+# Linting/testing after edits
+# lint-cmd: make vet
+# test-cmd: make test

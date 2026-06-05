@@ -1,0 +1,87 @@
+# go-adk-q Coding Rules
+# Auto-loaded by Cursor IDE from repo root
+
+## Project identity
+# Stack: Go 1.24 · google.golang.org/adk v1.2.0 · Bubbletea TUI · multi-provider failover
+# Module: go-adk-q
+# Entry points: main.go (ADK server), cmd/tui/main.go (TUI binary)
+
+## Hard rules (imperative)
+
+Always put ALL new agent definitions in main.go, not in separate files.
+Always use `m` (the failover chain variable) as Model in every new agent.
+Always add both `json:"name"` and `jsonschema:"Description."` tags to FunctionTool args struct fields.
+Always include `exitlooptool.New()` in the Tools of any LoopAgent sub-agent that should exit early.
+Always use `mustOK(err, "create agent_name")` immediately after llmagent.New/sequentialagent.New/etc.
+Always use unique OutputKey values across all stages in a SequentialAgent pipeline.
+Always create new provider packages in model/<providerName>/ with Config struct + ConfigFromEnv() + NewModel().
+Always return nil (not an error) from NewModel() when the API key env var is unset.
+Always register new providers in model/catalog/catalog.go KnownModels list.
+Always use `localskilltoolset.New(...)` — never the upstream google.golang.org/adk/tool/skilltoolset directly.
+
+Never import github.com/firebase/genkit outside model/oaibridge/bridge.go.
+Never assign Tools or Toolsets to Groq or NVIDIA provider-specific agents.
+Never deploy with ECHO_FALLBACK_ENABLED=1 — the echo model returns static text.
+Never use a raw provider model (groqLLM, nvidiaLLM, etc.) in a production agent; always use m.
+Never use `utils`, `helpers`, or `common` as package names.
+Never name two OutputKeys the same across stages of a SequentialAgent.
+Never call os.Exit in agent handlers or tool implementations.
+
+## Terminology
+# Say: provider (not: backend, vendor)
+# Say: LlmAgent (not: LLM agent, chat agent)
+# Say: FunctionTool (not: tool function, action)
+# Say: SkillToolset (not: skill plugin, tool plugin)
+# Say: failover chain (not: fallback chain, retry chain)
+# Say: session state (not: agent state, memory)
+# Say: oaibridge (not: OpenAI bridge, GenKit bridge)
+# Say: SKILL.md (not: skill file, plugin file)
+
+## FunctionTool skeleton
+# ```go
+# type myArgs struct {
+#     Input string `json:"input" jsonschema:"Description for the LLM."`
+# }
+# type myResult struct { Output string `json:"output"` }
+# func myHandler(_ tool.Context, a myArgs) (myResult, error) {
+#     if a.Input == "" { return myResult{}, fmt.Errorf("input required") }
+#     return myResult{Output: a.Input}, nil
+# }
+# func NewMyTool() tool.Tool {
+#     t, err := functiontool.New(functiontool.Config{Name:"my_tool", Description:"..."}, myHandler)
+#     if err != nil { panic(fmt.Sprintf("NewMyTool: %v", err)) }
+#     return t
+# }
+# ```
+
+## New agent skeleton
+# ```go
+# myAgent, err := llmagent.New(llmagent.Config{
+#     Name:        "my_agent",
+#     Model:       m,
+#     Description: "Routing hint for root agent — be specific.",
+#     Instruction: "System prompt. Reference state with {key}.",
+#     OutputKey:   "my_output",
+#     Tools:       []tool.Tool{tools.NewWeatherTool()},
+#     Toolsets:    agentToolsets,
+# })
+# mustOK(err, "create my_agent")
+# ```
+
+## Key file paths
+# main.go               — all agent definitions
+# tools/tools.go        — FunctionTools
+# model/failover/       — failover chain
+# model/oaibridge/      — only Genkit import
+# cmd/tui/main.go       — TUI entry
+# tool/skilltoolset/    — schema-patched SkillToolset
+# skills/               — SKILL.md library
+# docs/ai-memory/       — AI context files
+# AGENTS.md             — full coding instructions
+# llms-full.txt         — full RAG context
+
+## Testing
+# go test ./...         — all unit tests
+# make test             — via Makefile
+# Skip provider tests when API key is unset:
+#   if os.Getenv("GROQ_API_KEY") == "" { t.Skip("...") }

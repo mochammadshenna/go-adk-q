@@ -1,52 +1,64 @@
 # go-adk-q
 
-> Minimal, idiomatic Go reference implementation for the Google ADK Go SDK.
-> Multi-provider failover · Bubbletea TUI · ADK Skills · LLM Auditor · Memory · Artifacts
+> Google ADK Go reference implementation: every agent pattern + multi-provider
+> LLM failover + Bubbletea TUI. Zero-config AI onboarding built in.
 
-## Docs
+## AI Memory (load first)
 
-- /docs/README.md — Documentation index and navigation
+- /docs/ai-memory/QUICK_CONTEXT.md — ~300-token project summary for one-off prompts
+- /docs/ai-memory/SYSTEM_PROMPT.md — ~2000-token system prompt for full chat sessions
+- /docs/ai-memory/README.md — Tool-by-tool AI onboarding guide (Claude Code, Cursor, Copilot, Aider, ChatGPT)
+- /AGENTS.md — Canonical AI coding instructions (all rules, skeletons, conventions)
+- /llms-full.txt — Full RAG context ~15 000 tokens (index this into your vector store)
+
+## Tutorials
+
 - /docs/tutorials/get-started.md — Run the TUI in 5 minutes
-- /docs/tutorials/first-agent.md — Build your first custom agent
-- /docs/tutorials/add-provider.md — Add a new LLM provider
-- /docs/how-to/add-theme.md — Add a colour theme
-- /docs/how-to/add-skill.md — Add an agent skill
+- /docs/tutorials/first-agent.md — Build and run a custom FunctionTool agent
+- /docs/tutorials/add-provider.md — Add a new LLM provider end-to-end
+
+## How-To Guides
+
+- /docs/how-to/add-agent.md — Add a new agent to main.go
+- /docs/how-to/add-skill.md — Add a SKILL.md to the agent skill library
 - /docs/how-to/add-provider.md — Provider checklist (quick reference)
+- /docs/how-to/add-theme.md — Add a Bubbletea TUI colour theme
 - /docs/how-to/debug-tui.md — Debug TUI rendering bugs
-- /docs/reference/cli.md — CLI flags and keyboard shortcuts
+
+## Reference
+
 - /docs/reference/config.md — All environment variables
+- /docs/reference/cli.md — CLI flags, keyboard shortcuts, slash commands
 - /docs/reference/api.md — Go package API reference
+- /docs/reference/providers.md — Provider package reference (Gemini, Groq, NVIDIA, OpenRouter, HuggingFace, OpenCode, GitHub Models)
 - /docs/reference/themes.md — Theme index and palette fields
-- /docs/reference/providers.md — Provider package reference
-- /docs/explanation/architecture.md — Architecture overview and data flow
-- /docs/explanation/tui-rendering.md — TUI rendering deep-dive
-- /docs/explanation/failover.md — Failover design and trade-offs
-- /docs/adr/ADR-0001-adk-as-agent-layer.md — Why ADK (not Genkit flows)
+
+## Explanation
+
+- /docs/explanation/architecture.md — System diagram, data flow, layer responsibilities
+- /docs/explanation/failover.md — Failover design, buffering trade-off, provider ordering
+- /docs/explanation/tui-rendering.md — Bubbletea model, Lipgloss layout, Glamour markdown
+- /docs/explanation/pitfalls.md — 10 documented gotchas: symptom → root cause → fix
+
+## Architecture Decision Records
+
+- /docs/adr/ADR-0001-adk-as-agent-layer.md — Why ADK (not Genkit flows or custom framework)
 - /docs/adr/ADR-0002-genkit-compat-oai.md — Genkit used only for oaibridge
 - /docs/adr/ADR-0003-failover-buffered.md — Buffered failover rationale
 - /docs/adr/ADR-0004-lipgloss-join-vertical.md — Why JoinVertical was removed
-- /docs/adr/ADR-0005-provider-config-pattern.md — Config struct pattern
+- /docs/adr/ADR-0005-provider-config-pattern.md — Config struct + ConfigFromEnv pattern
+- /docs/adr/ADR-0006-skills-toolset.md — Why skills use SKILL.md + SkillToolset
+- /docs/adr/ADR-0007-skilltoolset-schema-patch.md — Why list_skills/load_skill schemas are patched
 
-## Source
+## Source (key files)
 
+- /main.go — All agent definitions and ADK launcher
 - /cmd/tui/main.go — TUI entry point, Cobra subcommands, provider registration
-- /cmd/tui/chat.go — Bubbletea model, themes, rendering (fillLines, paintLines)
-- /cmd/tui/markdown.go — Glamour Markdown style configs per theme
-- /cmd/tui/slash.go — Slash command autocomplete
-- /cmd/tui/model_picker.go — /model provider/model picker overlay
-- /cmd/tui/settings.go — /settings overlay
-- /cmd/tui/session.go — Session persistence
-- /model/catalog/catalog.go — ModelEntry, ProviderCatalog, global registry
-- /model/failover/failover.go — Multi-provider failover chain
-- /model/oaibridge/bridge.go — Genkit compat_oai → ADK model.LLM bridge
-- /model/echo/echo.go — Echo model (testing)
-- /model/groq/groq.go — Groq provider
-- /model/githubmodels/ — GitHub Models provider
-- /model/nvidia/ — NVIDIA NIM provider
-- /model/openrouter/ — OpenRouter provider
-- /model/huggingface/ — Hugging Face provider
-- /agents/llmauditor.go — LLM output auditor agent
-- /agents/collaboration/ — Multi-agent collaboration patterns
-- /tool/skilltoolset/skilltoolset.go — Skill SKILL.md loader as ADK toolset
-- /skills/ — Agent skill SKILL.md files (agents, collaboration, design, engineering)
-- /sample/ — Usage examples (groq, openrouter, opencodezen)
+- /cmd/tui/chat.go — Bubbletea model, themes, rendering
+- /tools/tools.go — FunctionTools: get_weather, get_current_time
+- /tool/skilltoolset/skilltoolset.go — Schema-patched SkillToolset for OpenAI-compat
+- /model/failover/failover.go — Multi-provider failover chain (buffered)
+- /model/oaibridge/bridge.go — Genkit compat_oai bridge (only Genkit import)
+- /model/catalog/catalog.go — ModelEntry registry for /model picker
+- /agents/llmauditor.go — Custom Run func agent pattern
+- /agents/collaboration/ — Multi-agent via agenttool patterns

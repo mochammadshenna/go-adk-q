@@ -15,16 +15,19 @@ run today.
 | Run the TUI in 5 minutes | [tutorials/get-started.md](tutorials/get-started.md) |
 | Build my first custom agent | [tutorials/first-agent.md](tutorials/first-agent.md) |
 | Add a new LLM provider | [tutorials/add-provider.md](tutorials/add-provider.md) |
-| Add a colour theme | [how-to/add-theme.md](how-to/add-theme.md) |
+| **Add a new agent to main.go** | [how-to/add-agent.md](how-to/add-agent.md) |
 | Add an agent skill | [how-to/add-skill.md](how-to/add-skill.md) |
+| Add a colour theme | [how-to/add-theme.md](how-to/add-theme.md) |
 | Debug a TUI rendering bug | [how-to/debug-tui.md](how-to/debug-tui.md) |
 | Look up CLI flags | [reference/cli.md](reference/cli.md) |
 | See all config env vars | [reference/config.md](reference/config.md) |
 | Browse provider APIs | [reference/providers.md](reference/providers.md) |
 | Understand the architecture | [explanation/architecture.md](explanation/architecture.md) |
-| Understand TUI rendering | [explanation/tui-rendering.md](explanation/tui-rendering.md) |
 | Understand failover design | [explanation/failover.md](explanation/failover.md) |
+| Understand TUI rendering | [explanation/tui-rendering.md](explanation/tui-rendering.md) |
+| Learn known pitfalls | [explanation/pitfalls.md](explanation/pitfalls.md) |
 | Read design decisions | [adr/](adr/) |
+| Load AI agent context | [ai-memory/README.md](ai-memory/README.md) |
 
 ---
 
@@ -39,9 +42,14 @@ docs/
 │   ├── get-started.md
 │   ├── first-agent.md
 │   └── add-provider.md
+├── ai-memory/             ← AI agent context files (llms.txt tier system)
+│   ├── README.md          ← tool-by-tool onboarding guide
+│   ├── QUICK_CONTEXT.md   ← ~300 tokens, one-off queries
+│   └── SYSTEM_PROMPT.md   ← ~2000 tokens, full chat sessions
 ├── how-to/                ← task-oriented, goal-directed recipes
-│   ├── add-theme.md
+│   ├── add-agent.md
 │   ├── add-skill.md
+│   ├── add-theme.md
 │   ├── add-provider.md
 │   └── debug-tui.md
 ├── reference/             ← information-oriented, precise and complete
@@ -52,14 +60,17 @@ docs/
 │   └── providers.md
 ├── explanation/           ← understanding-oriented, background and rationale
 │   ├── architecture.md
+│   ├── failover.md
 │   ├── tui-rendering.md
-│   └── failover.md
+│   └── pitfalls.md
 └── adr/                   ← Architecture Decision Records
     ├── ADR-0001-adk-as-agent-layer.md
     ├── ADR-0002-genkit-compat-oai.md
     ├── ADR-0003-failover-buffered.md
     ├── ADR-0004-lipgloss-join-vertical.md
-    └── ADR-0005-provider-config-pattern.md
+    ├── ADR-0005-provider-config-pattern.md
+    ├── ADR-0006-skills-toolset.md
+    └── ADR-0007-skilltoolset-schema-patch.md
 ```
 
 ---
@@ -78,8 +89,9 @@ then read [explanation/architecture.md](explanation/architecture.md).
 with [explanation/tui-rendering.md](explanation/tui-rendering.md) and
 [how-to/debug-tui.md](how-to/debug-tui.md).
 
-**Agent-legible (LLM)** — See [../llms.txt](../llms.txt) for a compact index
-and [../llms-full.txt](../llms-full.txt) for full content.
+**Agent-legible (LLM)** — See [../llms.txt](../llms.txt) for a compact index,
+[../llms-full.txt](../llms-full.txt) for full RAG context, and
+[ai-memory/README.md](ai-memory/README.md) for tool-by-tool onboarding.
 
 ---
 
