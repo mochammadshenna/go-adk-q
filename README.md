@@ -16,9 +16,45 @@ for Go. Every core ADK pattern in one codebase.
 | 7 | **Multi-agent system** — `agenttool.New` | `main.go` | [multi-agents](https://adk.dev/agents/multi-agents/) |
 | 8 | **Launcher** — run/web/api_server modes | `main.go` | [multi-tool tutorial](https://adk.dev/tutorials/multi-tool-agent/) |
 
-## Architecture
+## Companion Projects
+
+| Project | Description | Tools |
+|---------|-------------|-------|
+| [`dino-mcp/`](dino-mcp/) | Go MCP server with interactive HTML dashboard | `dino_think`, `dino_ask`, `dino_dashboard` |
+
+Built with Gin, ext-apps SDK, and the MCP Go SDK. All 13 docs indexed in context-mode:
 
 ```
+ctx_search(queries: ["dino dashboard", "add tool", "MCP Apps"], source: "dino-mcp-docs")
+```
+
+| Doc | Purpose |
+|-----|---------|
+| [`docs/tutorials/get-started.md`](dino-mcp/docs/tutorials/get-started.md) | Build + run in 5 min |
+| [`docs/tutorials/first-tool.md`](dino-mcp/docs/tutorials/first-tool.md) | Add a tool to the server |
+| [`docs/how-to/add-dinosaur.md`](dino-mcp/docs/how-to/add-dinosaur.md) | Extend the dino data model |
+| [`docs/reference/cli.md`](dino-mcp/docs/reference/cli.md) | CLI flags + routes reference |
+| [`docs/explanation/architecture.md`](dino-mcp/docs/explanation/architecture.md) | System design + data flow |
+| [`docs/adr/`](dino-mcp/docs/adr/) | 6 Architecture Decision Records |
+
+Add to Pi Agent:
+
+```json
+{
+  "mcpServers": {
+    "dino-mcp": {
+      "command": "/path/to/dino-mcp/bin/dino-mcp",
+      "args": ["stdio"],
+      "lifecycle": "lazy"
+    }
+  }
+}
+```
+
+---
+
+## Architecture
+
 root_agent  (LlmAgent — coordinator)
 ├── weather_time_agent   LlmAgent + get_weather + get_current_time tools
 ├── code_pipeline        SequentialAgent: CodeWriter → CodeReviewer → CodeRefactorer
@@ -26,6 +62,7 @@ root_agent  (LlmAgent — coordinator)
 ├── doc_refinement_loop  LoopAgent(max=3): DocDrafter → QualityChecker
 ├── parallel_analysis    ParallelAgent: TechResearcher ∥ BizAnalyst
 └── router_agent         Custom agent: Run func with session.State conditional logic
+
 ```
 
 ## Run
@@ -115,10 +152,25 @@ root, _ := llmagent.New(llmagent.Config{
 
 ```
 go-adk-q/
-  main.go          # All agent definitions + launcher
-  tools/
-    tools.go       # FunctionTools: get_weather, get_current_time
-  go.mod           # google.golang.org/adk v1.2.0
+├── main.go                    # All agent definitions + ADK launcher
+├── tools/
+│   └── tools.go               # FunctionTools: get_weather, get_current_time
+├── cmd/
+│   └── tui/                   # Bubbletea TUI (chat, themes, markdown, slash cmds)
+│       ├── main.go            # Cobra entry point
+│       ├── chat.go            # Bubbletea model + rendering (~95KB)
+│       ├── markdown.go        # Glamour renderer per theme
+│       ├── slash.go           # Slash command autocomplete
+│       ├── model_picker.go    # /model provider overlay
+│       ├── settings.go        # /settings overlay
+│       ├── session.go         # Session persistence
+│       └── acp_server.go      # Alternative Compute Protocol server
+├── model/                     # LLM providers + failover chain
+├── agents/                    # Custom agent implementations
+├── skills/                    # SKILL.md library (auto-discovered)
+├── tool/                      # SkillToolset schema patch
+├── go.mod                     # google.golang.org/adk v1.2.0
+└── dino-mcp/                  # Companion: Go MCP server (see above)
 ```
 
 ## Style

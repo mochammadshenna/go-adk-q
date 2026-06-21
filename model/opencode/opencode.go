@@ -12,10 +12,12 @@
 //
 // # Supported models (selection)
 //
-//	DefaultModel = "minimax-m2.5-free"  // MiniMax M2.5, free tier
-//	"big-pickle"                        // big-pickle (free)
-//	"hy3-preview-free"                  // HunYuan 3 preview (free)
-//	"nemotron-3-super-free"             // NVIDIA Nemotron 3 (free)
+//	DefaultModel = "deepseek-v4-flash-free"  // DeepSeek V4 Flash, free tier
+//	"big-pickle"                        // Big Pickle (free)
+//	"nemotron-3-ultra-free"             // NVIDIA Nemotron 3 (free)
+//	"mimo-v2.5-free"                    // Mimo V2.5 (free)
+//	"north-mini-code-free"              // North Mini Code (free)
+//	"deepseek-v4-flash-free"                   // DeepSeek V4 Flash (free)
 //
 // See https://opencode.ai/models for the current model list.
 //
@@ -28,7 +30,7 @@
 //
 //	m, err := opencode.NewModel(ctx, opencode.Config{
 //	    APIKey:    os.Getenv("OPENCODE_API_KEY"),
-//	    ModelName: "minimax-m2.5-free",
+//	    ModelName: "deepseek-v4-flash-free",
 //	})
 package opencode
 
@@ -47,8 +49,8 @@ import (
 // capacity may be limited.
 //
 // Model IDs are sent as-is to the API — do NOT include the "opencode/"
-// provider prefix here; the API expects bare model names (e.g. "minimax-m2.5-free",
-// not "opencode/minimax-m2.5-free").
+// provider prefix here; the API expects bare model names (e.g. "deepseek-v4-flash-free",
+// not "opencode/deepseek-v4-flash-free").
 //
 // Add new entries here to make them available in the /model TUI picker.
 var KnownModels = catalog.ProviderCatalog{
@@ -56,20 +58,22 @@ var KnownModels = catalog.ProviderCatalog{
 	Label:    "OpenCode",
 	Models: []catalog.ModelEntry{
 		// ── Default (free) ────────────────────────────────────────────────
-		{ID: "minimax-m2.5-free", Label: "MiniMax M2.5 (free)", Tags: []string{"free"}, Default: true},
-		// ── HunYuan ───────────────────────────────────────────────────────
-		{ID: "hy3-preview-free", Label: "HunYuan 3 Preview (free)", Tags: []string{"free"}},
+		{ID: "deepseek-v4-flash-free", Label: "DeepSeek V4 Flash (free)", Tags: []string{"free"}, Default: true},
+		// ── Mimo ─────────────────────────────────────────────────────────
+		{ID: "mimo-v2.5-free", Label: "Mimo V2.5 (free)", Tags: []string{"free"}},
 		// ── NVIDIA ────────────────────────────────────────────────────────
-		{ID: "nemotron-3-super-free", Label: "Nemotron 3 Super (free)", Tags: []string{"free"}},
+		{ID: "nemotron-3-ultra-free", Label: "Nemotron 3 Ultra (free)", Tags: []string{"free"}},
 		// ── Big Pickle ────────────────────────────────────────────────────
 		{ID: "big-pickle", Label: "Big Pickle (free)", Tags: []string{"free"}},
+		// ── North Mini Code ───────────────────────────────────────────────
+		{ID: "north-mini-code-free", Label: "North Mini Code (free)", Tags: []string{"free"}},
 	},
 }
 
 const (
 	// DefaultModel is MiniMax M2.5 (free tier) — a capable free-tier model
 	// and a good zero-cost fallback option.
-	DefaultModel = "minimax-m2.5-free"
+	DefaultModel = "deepseek-v4-flash-free"
 
 	baseURL  = "https://opencode.ai/zen/v1"
 	provider = "opencode"
@@ -88,7 +92,7 @@ type Config struct {
 	// Obtain one at https://opencode.ai.
 	APIKey string
 
-	// ModelName is the OpenCode model identifier, e.g. "minimax-m2.5-free".
+	// ModelName is the OpenCode model identifier, e.g. "deepseek-v4-flash-free".
 	// Do NOT include the "opencode/" prefix — model IDs are bare names.
 	// Defaults to [DefaultModel] when empty.
 	// See https://opencode.ai/models for the full list.

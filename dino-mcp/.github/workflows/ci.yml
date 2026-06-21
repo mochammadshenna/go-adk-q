@@ -1,0 +1,43 @@
+# CI — dino-mcp
+#
+# Triggers: push to main, any pull request.
+# Builds the Go binary + Vite UI, runs lint + integration tests.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: true
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Build UI
+        run: make build-ui
+
+      - name: Build binary
+        run: make build-go
+
+      - name: Lint
+        run: make lint
+
+      - name: Test
+        run: make test

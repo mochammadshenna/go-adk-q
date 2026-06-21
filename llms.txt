@@ -50,6 +50,11 @@
 - /docs/adr/ADR-0006-skills-toolset.md — Why skills use SKILL.md + SkillToolset
 - /docs/adr/ADR-0007-skilltoolset-schema-patch.md — Why list_skills/load_skill schemas are patched
 
+## Companion / Related Projects
+
+- /dino-mcp/ — Go MCP server reference: 3 tools + interactive HTML dashboard (Gin + ext-apps SDK)
+  Documentation indexed in context-mode as `dino-mcp-docs`
+
 ## Source (key files)
 
 - /main.go — All agent definitions and ADK launcher

@@ -1,0 +1,14 @@
+# Binaries
+bin/
+*.test
+*.exe
+
+# UI build
+ui/dist/
+ui/node_modules/
+
+# Temp files
+/tmp/
+*.swp
+*.swo
+.DS_Store

@@ -1,0 +1,212 @@
+# dino-mcp — Full Context for AI Agents
+
+> Complete project context (~15K tokens). AI agents: read this for full understanding before implementing.
+
+---
+
+## Project Identity
+
+**Name**: dino-mcp
+**Purpose**: Reference implementation of MCP Apps-enabled server with Go backend and TypeScript HTML UI.
+**Version**: 0.1.0 (development)
+**Go Version**: 1.25.0
+**MCP SDK**: github.com/modelcontextprotocol/go-sdk v1.6.1
+**HTTP Router**: github.com/gin-gonic/gin v1.12.0
+**UI SDK**: @modelcontextprotocol/ext-apps (TypeScript, Vite-bundled)
+
+## Repository Structure
+
+```
+dino-mcp/
+├── cmd/dino-mcp/main.go              # CLI: stdio, http, help
+├── internal/
+│   ├── server/server.go              # Composition root: New(), transports, Gin routes, CORS
+│   ├── tools/
+│   │   ├── tools.go                  # Shared types (DinoThinkResult, DinoSummary, constants)
+│   │   ├── think.go                  # RegisterThink() — dino_think (random fact)
+│   │   ├── ask.go                    # RegisterAsk() — dino_ask (Q&A)
+│   │   └── dashboard.go              # RegisterDashboardTool() + FilteredDinosaurs(), dinoData
+│   └── resources/
+│       ├── resources.go              # Package doc
+│       ├── dashboard.go              # RegisterDashboardResource() + //go:embed dashboard_ui.html
+│       └── dashboard_ui.html         # Embedded MCP App HTML (Vite-built, ~354KB)
+├── ui/
+│   ├── src/mcp-app.ts                # App class with PostMessageTransport
+│   ├── vite.config.ts                # vite-plugin-singlefile
+│   ├── package.json, tsconfig.json
+├── Makefile                          # build, run-*, test, dev-*, lint, clean, tunnel
+├── go.mod / go.sum
+├── AGENTS.md, SYSTEM.md, MEMORY.md, SKILL.md, PLAN.md, DESIGN.md
+├── CODE_CONDUCT.md, CONTRIBUTOR.md
+├── llms.txt, llms-full.txt
+├── test_mcp.sh                       # 7 integration tests
+└── docs/                             # Diátaxis: tutorials, how-to, reference, explanation, adr
+```
+
+## Key Implementation Details
+
+### Server (server.go)
+```go
+// Transport modes
+func RunStdio(ctx context.Context, s *mcp.Server, logger *slog.Logger) error
+func RunStreamableHTTP(ctx context.Context, s *mcp.Server, addr string, logger *slog.Logger) error
+
+// Gin routes
+r.Any("/mcp", gin.WrapH(mcpHandler))          // MCP JSON-RPC
+r.Any("/mcp/*any", gin.WrapH(mcpHandler))      // MCP subpaths
+r.GET("/dashboard", dashboardHandler)           // Standalone HTML
+r.GET("/dashboard/*any", dashboardHandler)      // Standalone subpaths
+r.GET("/api/dinosaurs", apiDinosaurHandler)     // JSON data
+r.GET("/health", healthHandler)                 // Health check
+
+// Middleware
+r.Use(gin.Recovery())       // Panic recovery
+r.Use(ginLogger(logger))    // Request logging
+r.Use(corsMiddleware())     // CORS headers
+```
+
+### Tool Registration
+```go
+// Text tool (no UI)
+mcp.AddTool(s, &mcp.Tool{
+    Name:        "dino_think",
+    Description: "...",
+    InputSchema: map[string]any{
+        "type":       "object",
+        "properties": map[string]any{},
+    },
+}, handler)
+
+// MCP App tool (with UI)
+mcp.AddTool(s, &mcp.Tool{
+    Name:        "dino_dashboard",
+    Description: "...",
+    InputSchema: map[string]any{
+        "type": "object",
+        "properties": map[string]any{
+            "filter": map[string]any{
+                "type":        "string",
+                "description": "Optional filter: 'carnivore', 'herbivore', 'jurassic', 'cretaceous', 'triassic'",
+            },
+        },
+    },
+    Meta: mcp.Meta{
+        "ui": map[string]any{
+            "resourceUri": "ui://dino-dashboard/mcp-app.html",
+        },
+    },
+}, handler)
+```
+
+### Resource Registration
+```go
+s.AddResource(&mcp.Resource{
+    URI:      "ui://dino-dashboard/mcp-app.html",
+    Name:     "Dino Dashboard",
+    MIMEType: "text/html;profile=mcp-app",
+}, func(ctx context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+    htmlData, _ := resources.DashboardHTML()
+    return &mcp.ReadResourceResult{
+        Contents: []*mcp.ResourceContents{
+            {URI: req.Params.URI, MIMEType: "text/html;profile=mcp-app", Text: string(htmlData)},
+        },
+    }, nil
+})
+```
+
+### View Protocol (mcp-app.ts)
+```ts
+import { App, PostMessageTransport } from "@modelcontextprotocol/ext-apps";
+
+const app = new App({ name: "Dino Dashboard", version: "0.1.0" });
+
+app.ontoolinput = (params) => { /* streaming data */ };
+app.ontoolresult = (result) => { /* final data */ };
+app.onhostcontextchanged = (ctx) => { /* theme, fonts, safe area */ };
+app.onteardown = async () => { /* cleanup */ };
+
+await app.connect(new PostMessageTransport());
+```
+
+### Standalone Dashboard Fallback
+```ts
+// Detected in dashboard_ui.html
+const standalone = window === window.parent;
+if (standalone) {
+    fetch('/api/dinosaurs')
+        .then(r => r.json())
+        .then(data => showDashboard(data.dinosaurs));
+} else {
+    // PostMessage protocol with host
+    await app.connect(new PostMessageTransport());
+}
+```
+
+## Data Model
+
+### DinoSummary (Go types / JSON shape)
+```go
+type DinoSummary struct {
+    Name       string `json:"name"`
+    Period     string `json:"period"`
+    Diet       string `json:"diet"`
+    Length     string `json:"length"`
+    Weight     string `json:"weight"`
+    FunFact    string `json:"funFact"`
+    ImageStyle string `json:"imageStyle"`
+}
+```
+
+### 12 Dinosaurs
+Tyrannosaurus Rex, Triceratops, Stegosaurus, Velociraptor, Brachiosaurus, Spinosaurus, Ankylosaurus, Diplodocus, Parasaurolophus, Pachycephalosaurus, Raptor, Maiasaura
+
+### API Response Format
+```json
+{
+  "dinosaurs": [DinoSummary, ...],
+  "filter": "Carnivore",
+  "timestamp": "2026-06-21T00:00:00Z",
+  "total": 4
+}
+```
+
+## Transport Details
+
+### Streamable HTTP
+- Endpoint: `POST /mcp`
+- Accept header must include `application/json` AND `text/event-stream`
+- Response: SSE stream (`event: message\ndata: {...}`) or JSON object
+- Session via `Mcp-Session-Id` header
+- Requires CORS support (OPTIONS → 200)
+
+### stdio
+- Process launched by MCP client (Claude Desktop)
+- JSON-RPC over stdin/stdout
+- No CORS, no HTTP, no session management
+
+## Integration Tests (test_mcp.sh)
+
+7 tests run against live server on :9010:
+1. Initialize → session ID returned
+2. notifications/initialized → accepted
+3. tools/list → dino_dashboard with _meta.ui.resourceUri
+4. tools/call dino_think → random fact + species
+5. tools/call dino_dashboard → filtered dinosaur list
+6. resources/read → HTML with text/html;profile=mcp-app
+7. tools/call dino_ask → Q&A result
+
+## Environment
+- Default port: :9010
+- No API keys required
+- Mode: gin.ReleaseMode or gin.DebugMode (verbose flag)
+- Version injected via -ldflags at build time
+
+## Known Issues & Pitfalls
+
+1. SSE transport is REMOVED from MCP spec — use Streamable HTTP
+2. CORS OPTIONS preflight must return 200 — required by browser MCP Inspector
+3. Cloudflare Tunnel blocked by DNS rebinding protection — set DisableLocalhostProtection: true
+4. MCP Apps must use ui/initialize protocol — NOT iframe-ready (MCP-UI) protocol
+5. Accept header must include BOTH application/json AND text/event-stream
+6. trycloudflare.com tunnels are temporary — restart generates new URL
+7. _meta.ui.resourceUri uses nested {ui: {resourceUri: ...}} — flat format deprecated

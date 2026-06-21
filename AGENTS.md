@@ -509,6 +509,7 @@ Never bypass this wrapper. Always use `localskilltoolset.New(...)`.
 | Bubbletea | `github.com/charmbracelet/bubbletea` |
 | wttr.in (weather) | https://wttr.in (no key needed) |
 | timeapi.io (time) | https://timeapi.io (no key needed) |
+| dino-mcp (MCP reference) | `./dino-mcp/` — Go MCP server with HTML dashboard |
 
 ---
 

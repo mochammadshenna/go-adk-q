@@ -1,0 +1,54 @@
+# dino-mcp — MCP Server with Interactive Dinosaur Dashboard
+
+> MCP Apps-enabled server written in Go. Tools for dinosaur facts, Q&A, and an interactive HTML dashboard.
+
+## Quick Links
+
+- https://modelcontextprotocol.io — MCP Specification
+- https://apps.extensions.modelcontextprotocol.io — MCP Apps API
+- https://github.com/modelcontextprotocol/go-sdk — Go MCP SDK
+- https://github.com/gin-gonic/gin — HTTP framework
+
+## Project Files
+
+### Core
+- cmd/dino-mcp/main.go — CLI entry point (stdio/http subcommands)
+- internal/server/server.go — Composition root: New(), transports, Gin routes, CORS
+- internal/tools/ — Tool handlers (think.go → dino_think, ask.go → dino_ask, dashboard.go → dino_dashboard)
+- internal/resources/ — Resource handlers (dashboard.go → ui://dino-dashboard/mcp-app.html + embedded HTML)
+
+### UI Source
+- ui/src/mcp-app.ts — App class with ext-apps SDK
+- ui/vite.config.ts — Vite + singlefile plugin
+- ui/package.json — Node.js dependencies
+
+### Build
+- Makefile — All build/run/test targets
+- go.mod — Go module definition
+
+### Docs
+- AGENTS.md — AI coding instructions
+- SYSTEM.md — Architecture deep-dive
+- MEMORY.md — Decision log
+- SKILL.md — Development skills
+- PLAN.md — Roadmap
+- DESIGN.md — Design decisions
+- docs/ — Diátaxis documentation
+- docs/adr/ — Architecture Decision Records
+
+## Key Concepts
+
+- **Tools**: dino_think (random fact), dino_ask (Q&A), dino_dashboard (MCP App)
+- **Resources**: ui://dino-dashboard/mcp-app.html with MIME type text/html;profile=mcp-app
+- **Transports**: stdio (Claude Desktop) and Streamable HTTP (browser/Inspector)
+- **MCP Apps**: HTML UI via @modelcontextprotocol/ext-apps SDK over postMessage
+- **Standalone**: /dashboard page + /api/dinosaurs JSON for browser fallback
+
+## Dependencies
+- Go 1.25+, github.com/modelcontextprotocol/go-sdk v1.6.1, github.com/gin-gonic/gin v1.12.0
+- @modelcontextprotocol/ext-apps (build-time for UI bundling)
+- cloudflared (dev-time for tunnel)
+
+## Architecture
+
+Server uses Gin router with CORS middleware wrapping MCP SDK's StreamableHTTPHandler. Tools registered via mcp.AddTool(). UI embedded via //go:embed and served as MCP resource. Standalone access at /dashboard with REST fallback at /api/dinosaurs.

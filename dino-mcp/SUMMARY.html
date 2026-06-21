@@ -1,0 +1,609 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>dino-mcp — Documentation Summary</title>
+  <style>
+    :root {
+      --bg: #0f0e17;
+      --bg-card: #1a1932;
+      --bg-hover: #23214a;
+      --text: #fffffe;
+      --text-sec: #a7a9be;
+      --accent: #a78bfa;
+      --accent2: #7c5cfc;
+      --green: #34d399;
+      --yellow: #fbbf24;
+      --red: #f87171;
+      --blue: #60a5fa;
+      --border: #2d2a44;
+    }
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body {
+      font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+    }
+    .container { max-width: 1100px; margin: 0 auto; padding: 0 24px; }
+
+    /* Hero */
+    .hero {
+      background: linear-gradient(135deg, #1a1932 0%, #2d2a44 50%, #1a1932 100%);
+      border-bottom: 1px solid var(--border);
+      padding: 64px 0 48px;
+      text-align: center;
+    }
+    .hero h1 {
+      font-size: 48px;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      margin-bottom: 8px;
+    }
+    .hero .subtitle {
+      font-size: 18px;
+      color: var(--text-sec);
+      max-width: 600px;
+      margin: 0 auto 16px;
+    }
+    .hero .badge-row { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin-top: 16px; }
+    .badge {
+      display: inline-block;
+      padding: 4px 14px;
+      border-radius: 20px;
+      font-size: 13px;
+      font-weight: 600;
+      background: var(--bg-hover);
+      border: 1px solid var(--border);
+    }
+    .badge.go { background: #00ADD8; color: #000; border-color: #00ADD8; }
+    .badge.gin { background: #0099e5; color: #fff; border-color: #0099e5; }
+    .badge.mcp { background: #a78bfa; color: #fff; border-color: #a78bfa; }
+    .badge.ts { background: #3178c6; color: #fff; border-color: #3178c6; }
+    .badge.green { background: var(--green); color: #000; border-color: var(--green); }
+    .badge.yellow { background: var(--yellow); color: #000; border-color: var(--yellow); }
+
+    /* Sections */
+    section { padding: 48px 0; border-bottom: 1px solid var(--border); }
+    section:last-child { border-bottom: none; }
+    h2 {
+      font-size: 28px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin-bottom: 24px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    h3 {
+      font-size: 18px;
+      font-weight: 600;
+      margin: 20px 0 10px;
+      color: var(--accent);
+    }
+
+    /* Stats */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 16px;
+      margin-bottom: 32px;
+    }
+    .stat-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+      text-align: center;
+    }
+    .stat-card .num { font-size: 32px; font-weight: 800; color: var(--accent); }
+    .stat-card .lbl { font-size: 13px; color: var(--text-sec); margin-top: 4px; }
+
+    /* Cards */
+    .card-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 16px;
+    }
+    .doc-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+      transition: all 0.2s;
+    }
+    .doc-card:hover {
+      background: var(--bg-hover);
+      border-color: var(--accent);
+      transform: translateY(-2px);
+    }
+    .doc-card h4 { font-size: 15px; font-weight: 600; margin-bottom: 6px; }
+    .doc-card p { font-size: 13px; color: var(--text-sec); }
+    .doc-card .meta {
+      display: flex; gap: 8px; margin-top: 10px;
+      font-size: 11px; color: var(--text-sec);
+    }
+    .doc-card .tag {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .tag.core { background: var(--accent); color: #fff; }
+    .tag.docs { background: var(--blue); color: #fff; }
+    .tag.ext { background: var(--green); color: #000; }
+    .tag.adr { background: var(--yellow); color: #000; }
+
+    /* Table */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+    }
+    th {
+      text-align: left;
+      padding: 10px 12px;
+      background: var(--bg-hover);
+      border-bottom: 2px solid var(--border);
+      font-weight: 600;
+      color: var(--text-sec);
+    }
+    td {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    tr:hover td { background: var(--bg-hover); }
+    .check { color: var(--green); }
+
+    /* Timeline */
+    .timeline { position: relative; padding-left: 32px; }
+    .timeline::before {
+      content: '';
+      position: absolute;
+      left: 12px;
+      top: 0;
+      bottom: 0;
+      width: 2px;
+      background: var(--border);
+    }
+    .tl-item { position: relative; margin-bottom: 20px; }
+    .tl-item::before {
+      content: '';
+      position: absolute;
+      left: -24px;
+      top: 6px;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--accent);
+      border: 2px solid var(--bg);
+    }
+    .tl-item .date { font-size: 12px; color: var(--text-sec); }
+    .tl-item .title { font-weight: 600; }
+    .tl-item .desc { font-size: 14px; color: var(--text-sec); }
+
+    /* Architecture diagram */
+    .arch-box {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 24px;
+      margin: 16px 0;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      font-size: 13px;
+      line-height: 1.8;
+      overflow-x: auto;
+    }
+
+    .status-done { color: var(--green); }
+    .status-wip { color: var(--yellow); }
+    .status-todo { color: var(--text-sec); }
+
+    footer {
+      text-align: center;
+      padding: 32px 0;
+      color: var(--text-sec);
+      font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+  <div class="hero">
+    <h1>🦕 dino-mcp</h1>
+    <p class="subtitle">MCP Apps-enabled server with interactive HTML dashboard.<br>Go backend, TypeScript View, zero runtime dependencies.</p>
+    <div class="badge-row">
+      <span class="badge go">Go 1.25</span>
+      <span class="badge gin">Gin 1.12</span>
+      <span class="badge mcp">MCP Go SDK 1.6.1</span>
+      <span class="badge ts">ext-apps SDK</span>
+      <span class="badge green">12 Dinosaurs</span>
+      <span class="badge yellow">3 Tools</span>
+    </div>
+  </div>
+
+  <div class="container">
+    <!-- Stats -->
+    <section>
+      <h2>📊 Documentation Stats</h2>
+      <div class="stats-grid">
+        <div class="stat-card"><div class="num">22</div><div class="lbl">Markdown Files</div></div>
+        <div class="stat-card"><div class="num">6</div><div class="lbl">Architecture ADRs</div></div>
+        <div class="stat-card"><div class="num">14</div><div class="lbl">Mermaid Diagrams</div></div>
+        <div class="stat-card"><div class="num">2</div><div class="lbl">D2 Diagrams</div></div>
+        <div class="stat-card"><div class="num">7</div><div class="lbl">Integration Tests</div></div>
+        <div class="stat-card"><div class="num">~75KB</div><div class="lbl">Total Documentation</div></div>
+      </div>
+    </section>
+
+    <!-- File Inventory -->
+    <section>
+      <h2>📄 File Inventory</h2>
+
+      <h3>Root Docs (Agent Memory Files)</h3>
+      <div class="card-grid">
+        <div class="doc-card">
+          <span class="tag core">CORE</span>
+          <h4>AGENTS.md</h4>
+          <p>AI coding instructions — canonical memory for all coding agents.</p>
+          <div class="meta">Covers: naming, patterns, pitfalls, testing</div>
+        </div>
+        <div class="doc-card">
+          <span class="tag core">CORE</span>
+          <h4>SYSTEM.md</h4>
+          <p>System architecture with C4 diagrams, sequence flows, data model.</p>
+          <div class="meta">7 Mermaid diagrams</div>
+        </div>
+        <div class="doc-card">
+          <span class="tag core">CORE</span>
+          <h4>ARCHITECTURE.md</h4>
+          <p>Deep architecture with C4 container diagrams, security boundaries, deployment topology.</p>
+          <div class="meta">6 Mermaid diagrams</div>
+        </div>
+        <div class="doc-card">
+          <span class="tag core">CORE</span>
+          <h4>TECH_DESIGN.md</h4>
+          <p>Technical design document: interfaces, contracts, data structures, error handling.</p>
+          <div class="meta">11 sections, all interfaces documented</div>
+        </div>
+        <div class="doc-card">
+          <span class="tag core">CORE</span>
+          <h4>MEMORY.md</h4>
+          <p>Decision log, resolved issues, development history.</p>
+          <div class="meta">10 active decisions, 6 resolved issues</div>
+        </div>
+        <div class="doc-card">
+          <span class="tag core">CORE</span>
+          <h4>SKILL.md</h4>
+          <p>Agent skills: build, test, debug, tunnel, add-tool.</p>
+          <div class="meta">5 development skills</div>
+        </div>
+        <div class="doc-card">
+          <span class="tag core">CORE</span>
+          <h4>PLAN.md</h4>
+          <p>Development roadmap with 5 phases and milestones.</p>
+          <div class="meta">MVP ✅ → Production → Enhanced UI → Ecosystem → Advanced</div>
+        </div>
+        <div class="doc-card">
+          <span class="tag core">CORE</span>
+          <h4>DESIGN.md</h4>
+          <p>Design decisions, trade-offs, personas, D2 diagram.</p>
+          <div class="meta">4 personas, 4 trade-off tables</div>
+        </div>
+        <div class="doc-card">
+          <span class="tag core">CORE</span>
+          <h4>README.md</h4>
+          <p>Quick-start entry point for developers.</p>
+          <div class="meta">30-second architecture summary</div>
+        </div>
+      </div>
+
+      <h3 style="margin-top:24px;">Community & Governance</h3>
+      <div class="card-grid">
+        <div class="doc-card">
+          <span class="tag ext">GOV</span>
+          <h4>CODE_CONDUCT.md</h4>
+          <p>Community standards based on Contributor Covenant 2.1.</p>
+        </div>
+        <div class="doc-card">
+          <span class="tag ext">GOV</span>
+          <h4>CONTRIBUTOR.md</h4>
+          <p>Contribution guidelines, PR workflow, style guides.</p>
+        </div>
+      </div>
+
+      <h3 style="margin-top:24px;">Diátaxis Documentation</h3>
+      <div class="card-grid">
+        <div class="doc-card">
+          <span class="tag docs">TUTORIAL</span>
+          <h4>docs/tutorials/get-started.md</h4>
+          <p>Zero to running in 5 minutes — build, run, test, Claude Desktop.</p>
+        </div>
+        <div class="doc-card">
+          <span class="tag docs">TUTORIAL</span>
+          <h4>docs/tutorials/first-tool.md</h4>
+          <p>Add a new MCP tool with typed args/results.</p>
+        </div>
+        <div class="doc-card">
+          <span class="tag docs">HOW-TO</span>
+          <h4>docs/how-to/add-dinosaur.md</h4>
+          <p>Add a new dinosaur species to the dashboard.</p>
+        </div>
+        <div class="doc-card">
+          <span class="tag docs">HOW-TO</span>
+          <h4>docs/how-to/test-inspector.md</h4>
+          <p>Test with MCP Inspector interactively.</p>
+        </div>
+        <div class="doc-card">
+          <span class="tag docs">REF</span>
+          <h4>docs/reference/cli.md</h4>
+          <p>CLI reference — subcommands, flags, exit codes.</p>
+        </div>
+        <div class="doc-card">
+          <span class="tag docs">EXPLAIN</span>
+          <h4>docs/explanation/architecture.md</h4>
+          <p>End-to-end architecture explanation with flowcharts.</p>
+        </div>
+        <div class="doc-card">
+          <span class="tag docs">INDEX</span>
+          <h4>docs/README.md</h4>
+          <p>Documentation map, persona routing, file index.</p>
+        </div>
+      </div>
+
+      <h3 style="margin-top:24px;">Architecture Decision Records</h3>
+      <div class="card-grid">
+        <div class="doc-card">
+          <span class="tag adr">ADR-1</span>
+          <h4>Go over TypeScript</h4>
+          <p>Why Go was chosen over TypeScript/Node.js for the server.</p>
+        </div>
+        <div class="doc-card">
+          <span class="tag adr">ADR-2</span>
+          <h4>Gin over ServeMux</h4>
+          <p>Why Gin was chosen over http.ServeMux and Chi.</p>
+        </div>
+        <div class="doc-card">
+          <span class="tag adr">ADR-3</span>
+          <h4>ext-apps SDK</h4>
+          <p>Why official MCP Apps SDK over community MCP-UI protocol.</p>
+        </div>
+        <div class="doc-card">
+          <span class="tag adr">ADR-4</span>
+          <h4>CORS Strategy</h4>
+          <p>Why wildcard CORS for dev, production considerations.</p>
+        </div>
+        <div class="doc-card">
+          <span class="tag adr">ADR-5</span>
+          <h4>Transport Selection</h4>
+          <p>Why Streamable HTTP + stdio, not SSE.</p>
+        </div>
+        <div class="doc-card">
+          <span class="tag adr">ADR-6</span>
+          <h4>Standalone Dashboard</h4>
+          <p>Why /dashboard and /api/dinosaurs exist as fallback.</p>
+        </div>
+      </div>
+
+      <h3 style="margin-top:24px;">LLM Index Files</h3>
+      <div class="card-grid">
+        <div class="doc-card">
+          <span class="tag ext">AI</span>
+          <h4>llms.txt</h4>
+          <p>LLM index following llmstxt.org standard. Quick project overview.</p>
+        </div>
+        <div class="doc-card">
+          <span class="tag ext">AI</span>
+          <h4>llms-full.txt</h4>
+          <p>Full RAG context (~7KB). Complete project understanding for AI agents.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Architecture Summary -->
+    <section>
+      <h2>🏗️ Architecture Summary</h2>
+      <div class="arch-box">
+┌─────────────────────────────────────────────────────────────────┐
+│                      dino-mcp Architecture                       │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  CLI Layer                                                       │
+│  ┌─────────────┐  ┌─────────────┐                               │
+│  │ stdio       │  │ http        │  cmd/dino-mcp/main.go         │
+│  │ (subprocess)│  │ (Gin :9010) │                               │
+│  └──────┬──────┘  └──────┬──────┘                               │
+│         │                │                                       │
+│  ┌──────▼────────────────▼──────┐                                │
+│  │     mcp.Server (Go SDK)     │  internal/server/server.go     │
+│  │  + Gin Router + CORS       │                                │
+│  │  + Middleware Chain         │                                │
+│  └──────┬────────────────┬─────┘                                │
+│         │                │                                       │
+│  ┌──────▼────┐    ┌──────▼──────┐                                │
+│  │  Tools    │    │  Resources  │                                │
+│  │ dino_think│    │  ui://...   │  internal/server/             │
+│  │ dino_ask  │    │  .html      │                                │
+│  │ dino_dash │    │  (//go:embed)│                               │
+│  └───────────┘    └─────────────┘                                │
+│                                                                  │
+│  UI: ui/src/mcp-app.ts → Vite → dashboard_ui.html (embedded)    │
+│  API: /dashboard (HTML) + /api/dinosaurs (JSON)                 │
+│  Tunnel: cloudflared → trycloudflare.com                        │
+│                                                                  │
+│  Clients: Claude Desktop (stdio) | Inspector (HTTP) | Browser   │
+│                                                                  │
+│  Transports: stdio ✅ | Streamable HTTP ✅ | SSE ❌ (deprecated) │
+└─────────────────────────────────────────────────────────────────┘
+      </div>
+    </section>
+
+    <!-- Personas -->
+    <section>
+      <h2>👤 Persona-Oriented Documentation</h2>
+      <table>
+        <tr><th>Persona</th><th>Start Here</th><th>Good Job Looks Like</th></tr>
+        <tr>
+          <td>🦕 Dino Developer</td>
+          <td>docs/tutorials/get-started.md</td>
+          <td>Adds dinosaur → rebuilds → sees in dashboard → commits</td>
+        </tr>
+        <tr>
+          <td>🔌 MCP Integrator</td>
+          <td>AGENTS.md</td>
+          <td>Reads tool/resource pattern → implements in own server → tests pass</td>
+        </tr>
+        <tr>
+          <td>🧪 QA Engineer</td>
+          <td>docs/how-to/test-inspector.md</td>
+          <td>make test → 7/7 → MCP Inspector → all tools work</td>
+        </tr>
+        <tr>
+          <td>🚀 DevOps Engineer</td>
+          <td>docs/reference/cli.md</td>
+          <td>GIN_MODE=release → ./bin/dino-mcp http :8080 → /health → 200</td>
+        </tr>
+        <tr>
+          <td>🤖 AI Agent</td>
+          <td>AGENTS.md → llms-full.txt</td>
+          <td>Reads all docs → implements changes correctly → tests pass</td>
+        </tr>
+      </table>
+    </section>
+
+    <!-- Tools & Transport -->
+    <section>
+      <h2>🔧 Tools & Transports</h2>
+      <table>
+        <tr><th>Feature</th><th>Status</th><th>Description</th></tr>
+        <tr><td>dino_think</td><td class="check">✅</td><td>Random dinosaur fact with structured content</td></tr>
+        <tr><td>dino_ask</td><td class="check">✅</td><td>Dinosaur Q&A from knowledge base</td></tr>
+        <tr><td>dino_dashboard</td><td class="check">✅</td><td>MCP App with interactive HTML UI</td></tr>
+        <tr><td>stdio transport</td><td class="check">✅</td><td>Claude Desktop, Copilot, Cursor</td></tr>
+        <tr><td>Streamable HTTP</td><td class="check">✅</td><td>MCP Inspector, curl, browser, tunnel</td></tr>
+        <tr><td>SSE transport</td><td class="check">❌</td><td>Removed from MCP spec (deprecated)</td></tr>
+        <tr><td>Cloudflare Tunnel</td><td class="check">✅</td><td>make run-tunnel for remote testing</td></tr>
+        <tr><td>CORS support</td><td class="check">✅</td><td>Wildcard origin for dev, OPTIONS → 200</td></tr>
+        <tr><td>Standalone /dashboard</td><td class="check">✅</td><td>Browser-accessible HTML with REST API fallback</td></tr>
+        <tr><td>MCP Apps protocol</td><td class="check">✅</td><td>ui/initialize via @modelcontextprotocol/ext-apps</td></tr>
+      </table>
+    </section>
+
+    <!-- Decision Timeline -->
+    <section>
+      <h2>📅 Decision Timeline</h2>
+      <div class="timeline">
+        <div class="tl-item">
+          <div class="date">2026-06-19</div>
+          <div class="title">Initial Scaffold</div>
+          <div class="desc">Project skeleton, 3 tools, standalone HTML dashboard</div>
+        </div>
+        <div class="tl-item">
+          <div class="date">2026-06-21 — 10:00</div>
+          <div class="title">SSE → Streamable HTTP</div>
+          <div class="desc">Removed deprecated SSE transport, switched to Streamable HTTP</div>
+        </div>
+        <div class="tl-item">
+          <div class="date">2026-06-21 — 10:30</div>
+          <div class="title">Gin Migration</div>
+          <div class="desc">Replaced http.ServeMux with Gin for CORS + middleware</div>
+        </div>
+        <div class="tl-item">
+          <div class="date">2026-06-21 — 11:00</div>
+          <div class="title">CORS + Tunnel Fixes</div>
+          <div class="desc">Added CORS middleware, disabled DNS rebinding protection for tunnel</div>
+        </div>
+        <div class="tl-item">
+          <div class="date">2026-06-21 — 11:30</div>
+          <div class="title">ext-apps SDK Migration</div>
+          <div class="desc">Replaced MCP-UI protocol with official ext-apps SDK</div>
+        </div>
+        <div class="tl-item">
+          <div class="date">2026-06-21 — 12:00</div>
+          <div class="title">Documentation Complete</div>
+          <div class="desc">22 markdown files, Diátaxis structure, ADRs, llms.txt, HTML report</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Pitfalls -->
+    <section>
+      <h2>⚠️ Known Pitfalls</h2>
+      <table>
+        <tr><th>#</th><th>Pitfall</th><th>Symptom</th><th>Fix</th></tr>
+        <tr><td>1</td><td>SSE transport deprecated</td><td>Spec non-compliance</td><td>Use Streamable HTTP only</td></tr>
+        <tr><td>2</td><td>OPTIONS preflight returns 405</td><td>CORS error in Inspector</td><td>Add corsMiddleware() before routes</td></tr>
+        <tr><td>3</td><td>DNS rebinding blocks tunnel</td><td>403 Forbidden via cloudflared</td><td>Set DisableLocalhostProtection: true</td></tr>
+        <tr><td>4</td><td>Wrong postMessage protocol</td><td>UI doesn't render in Claude Desktop</td><td>Use ui/initialize, not iframe-ready</td></tr>
+        <tr><td>5</td><td>Wrong Accept header</td><td>400 Bad Request</td><td>Send both application/json + text/event-stream</td></tr>
+        <tr><td>6</td><td>trycloudflare tunnel expires</td><td>URL stops working</td><td>Restart tunnel → new URL → update config</td></tr>
+        <tr><td>7</td><td>Flat _meta format</td><td>Deprecated by spec</td><td>Use nested {ui: {resourceUri: ...}}</td></tr>
+        <tr><td>8</td><td>Session ID grep too broad</td><td>Test picks up CORS header</td><td>Anchor grep to start of line: ^Mcp-Session-Id:</td></tr>
+      </table>
+    </section>
+
+    <!-- Next Steps -->
+    <section>
+      <h2>🚀 Next Steps</h2>
+      <p>Current status: <strong>MVP Complete</strong> ✅</p>
+      <table>
+        <tr><th>Phase</th><th>Priority</th><th>Key Items</th></tr>
+        <tr>
+          <td>Production Hardening</td>
+          <td><span class="badge yellow">HIGH</span></td>
+          <td>Go unit tests, CI pipeline, rate limiting, structured logging</td>
+        </tr>
+        <tr>
+          <td>Enhanced UI</td>
+          <td><span class="badge">MEDIUM</span></td>
+          <td>Real-time data, export, comparison mode, timeline view</td>
+        </tr>
+        <tr>
+          <td>Ecosystem</td>
+          <td><span class="badge">MEDIUM</span></td>
+          <td>Homebrew, Docker, GitHub releases, go-adk-q integration</td>
+        </tr>
+        <tr>
+          <td>Advanced Features</td>
+          <td><span class="badge">LOW</span></td>
+          <td>Streaming tool inputs, multi-user sessions, WebSocket sync</td>
+        </tr>
+      </table>
+    </section>
+
+    <!-- Key Commands -->
+    <section>
+      <h2>💻 Key Commands</h2>
+      <div class="arch-box">
+# Build & Run
+make build-fast          # Quick build (Go only)
+make dev-http            # Run with verbose logging
+make run-stdio           # Run for Claude Desktop
+
+# Test
+make test                # 7 integration tests
+make test-inspector      # Launch MCP Inspector
+
+# Tunnel
+make run-tunnel          # Cloudflare Tunnel
+
+# UI
+make build-ui            # Build Vite UI
+make build               # Full build (UI + Go)
+
+# Verify
+make lint                # go vet + go fmt
+make clean               # Remove artifacts
+      </div>
+    </section>
+  </div>
+
+  <footer>
+    dino-mcp Documentation Summary — Generated 2026-06-21<br>
+    Diátaxis framework · 22 files · 14 Mermaid diagrams · 6 ADRs · 7 tests
+  </footer>
+</body>
+</html>
