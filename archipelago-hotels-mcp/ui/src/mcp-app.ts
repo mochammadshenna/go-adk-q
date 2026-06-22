@@ -37,10 +37,11 @@ interface HotelSummary {
 interface RoomType {
   name: string;
   pricePerNight: number;
-  baseRate: number;
+  baseRate?: number;
   currency: string;
   maxGuests: number;
   rateSource: string;
+  roomImage?: string;
 }
 
 interface HotelDetail {
@@ -60,6 +61,7 @@ interface HotelDetail {
   thumbnail?: string;
   roomTypes?: RoomType[];
   startingPrice?: number;
+  bookingUrl?: string;
 }
 
 interface DashboardData {
@@ -68,6 +70,9 @@ interface DashboardData {
   total: number;
   match: number;
   message: string;
+  sortBy?: string;
+  city?: string;
+  destination?: string;
 }
 
 interface ToolInputParams {
@@ -214,8 +219,9 @@ function hexToTheme(hex: string): BrandTheme {
   const mix = (c: number) => Math.round(c * 0.45 + 255 * 0.55);
   const gradFrom = `rgb(${mix(r)},${mix(g)},${mix(b)})`;
   const gradTo   = `rgb(${Math.round(r*0.08)},${Math.round(g*0.08)},${Math.round(b*0.08)})`;
+  const pastel = (c: number) => Math.round(c * 0.15 + 255 * 0.85);
   return {
-    badge: "rgba(255,255,255,0.92)",
+    badge: `rgb(${pastel(r)},${pastel(g)},${pastel(b)})`,
     badgeText: hex,
     gradFrom,
     gradMid: hex,
@@ -604,7 +610,7 @@ const STYLES = `
     padding: 10px 12px; gap: 8px;
   }
   .price-block { display: flex; flex-direction: column; gap: 2px; }
-  .price-from { font-size: 9px; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.05em; }
+  .price-from { font-size: 11px; color: var(--text-2); text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; }
   .price-row { display: flex; align-items: baseline; gap: 3px; }
   .price-val { font-size: 24px; font-weight: 800; letter-spacing: -0.02em; line-height: 1; }
   .price-night { font-size: 11px; color: var(--text-3); }
@@ -667,14 +673,17 @@ const STYLES = `
     background: linear-gradient(180deg, rgba(0,0,0,0.1) 0%, rgba(0,0,0,0.7) 100%);
     pointer-events: none;
   }
-  .overlay-hero-content { position: absolute; bottom: 16px; left: 16px; right: 56px; z-index: 2; }
+  .overlay-hero-top { position: absolute; top: 12px; left: 14px; z-index: 2; }
+  .overlay-hero-content { position: absolute; bottom: 16px; left: 16px; right: 16px; z-index: 2; }
   .overlay-hotel-name {
     font-size: 20px; font-weight: 800; color: #fff; line-height: 1.2;
     text-shadow: 0 2px 8px rgba(0,0,0,0.4); text-wrap: balance;
   }
   .overlay-hotel-meta { display: flex; align-items: center; gap: 8px; margin-top: 4px; flex-wrap: wrap; }
+  .book-now-btn { display: inline-block; background: #00215b; color: #fff; padding: 12px 32px; border-radius: 6px; font-weight: 700; font-size: 15px; text-decoration: none; white-space: nowrap; text-transform: uppercase; letter-spacing: 0.08em; cursor: pointer; }
+  .book-now-btn:hover { background: #003080; }
+  .book-now-wrap { padding: 16px 20px 0; }
   .overlay-rating-badge { font-size: 13px; font-weight: 700; color: #fff; padding: 2px 8px; border-radius: 6px; }
-  .overlay-city { font-size: 12px; color: rgba(255,255,255,0.75); }
   .overlay-stars { font-size: 12px; }
 
   /* Overlay body */
@@ -698,11 +707,14 @@ const STYLES = `
   }
   .room-card:hover { border-color: var(--border-h); }
   .room-card:last-child { margin-bottom: 0; }
+  .room-card-img { width: 100%; height: 120px; object-fit: cover; border-radius: 4px; margin-bottom: 8px; display: block; }
 
   .room-card-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
   .room-name { font-size: 14px; font-weight: 700; line-height: 1.2; }
-  .room-price-block { text-align: right; flex-shrink: 0; display: flex; flex-direction: row; align-items: baseline; gap: 4px; }
+  .room-price-block { text-align: right; flex-shrink: 0; display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+  .room-price-row { display: flex; align-items: baseline; gap: 4px; }
   .room-price { font-size: 16px; font-weight: 800; letter-spacing: -0.02em; }
+  .room-price-original { font-size: 12px; color: var(--text-3); text-decoration: line-through; text-decoration-color: #e53e3e; }
   .room-price-night { font-size: 10px; color: var(--text-3); }
 
   .room-details { display: flex; align-items: center; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
@@ -726,12 +738,13 @@ const STYLES = `
 
   /* Starting price callout */
   .starting-callout {
-    background: #eaf9ed; border: 1px solid var(--gold-border);
-    border-radius: var(--r-sm); padding: 10px 12px; margin-bottom: 14px;
     display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 14px; gap: 12px;
   }
-  .starting-callout-label { font-size: 11px; color: var(--text-2); }
-  .starting-callout-price { font-size: 18px; font-weight: 800; color: #2BC14B; }
+  .starting-callout-left { display: flex; flex-direction: column; gap: 1px; }
+  .starting-callout-label { font-size: 14px; color: var(--text-2); }
+  .starting-callout-price { font-size: 26px; font-weight: 800; color: #2BC14B; }
+  .book-now-wrap { padding: 16px 20px 0; }
 
   /* No rooms */
   .no-rooms {
@@ -877,6 +890,19 @@ function buildDOM(): void {
   document.getElementById("overlay-backdrop")?.addEventListener("click", closeOverlay);
   document.getElementById("overlay-close")?.addEventListener("click", closeOverlay);
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeOverlay(); });
+  document.addEventListener("click", (e) => {
+    const btn = (e.target as Element).closest<HTMLAnchorElement>(".book-now-btn");
+    if (btn?.href) {
+      e.preventDefault();
+      e.stopPropagation();
+      // MCP server (outside sandbox) opens URL via exec.Command("open", url)
+      appRef?.callServerTool({ name: "open_booking_url", arguments: { url: btn.href } })
+        .catch(() => {
+          // fallback: let Claude Desktop handle via postMessage
+          window.parent.postMessage({ type: "OPEN_BOOKING_URL", url: btn.href }, "*");
+        });
+    }
+  });
 }
 
 // ── Stats / filters ──────────────────────────────────────────────────────────
@@ -1046,7 +1072,7 @@ function openOverlay(hotelId: string, hotelName: string, anchor?: HTMLElement): 
   if (content) {
     content.innerHTML = `
       <div style="padding:80px 24px;text-align:center;color:var(--text-2)">
-        <div style="font-size:28px;margin-bottom:10px;animation:pulse 1.5s infinite">🏨</div>
+        <div style="width:28px;height:28px;margin:0 auto 10px;animation:pulse 1.5s infinite;color:var(--text-2)"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect width="16" height="20" x="4" y="2" rx="2"/><path d="M9 22v-4h6v4"/><path d="M8 6h.01"/><path d="M16 6h.01"/><path d="M12 6h.01"/><path d="M12 10h.01"/><path d="M16 10h.01"/><path d="M8 10h.01"/><path d="M12 14h.01"/><path d="M16 14h.01"/><path d="M8 14h.01"/></svg></div>
         <div>Loading <strong style="color:var(--text-1)">${esc(hotelName)}</strong>…</div>
       </div>`;
   }
@@ -1083,6 +1109,25 @@ function renderRoomDetail(detail: HotelDetail): string {
   const gradient = buildPhotoGradient(theme);
   const stars = deriveStars(detail.rating, detail.stars);
   const rooms = detail.roomTypes ?? [];
+
+  const _pad = (n: number) => String(n).padStart(2, "0");
+  const _fmt = (d: Date) => `${d.getFullYear()}-${_pad(d.getMonth()+1)}-${_pad(d.getDate())}`;
+  const _now = new Date();
+  const _tom = new Date(_now); _tom.setDate(_tom.getDate() + 1);
+  let bookingHref = "";
+  if (detail.bookingUrl) {
+    try {
+      const _u = new URL(detail.bookingUrl);
+      if (_u.protocol === "https:" || _u.protocol === "http:") {
+        _u.searchParams.set("in", _fmt(_now));
+        _u.searchParams.set("out", _fmt(_tom));
+        _u.searchParams.set("guests", "A,A");
+        _u.searchParams.set("cur", detail.currency);
+        bookingHref = _u.toString();
+      }
+    } catch { /* ignore invalid or non-http URLs */ }
+  }
+
   const heroThumb = detail.thumbnail
     ? `<img class="overlay-hero-thumb" src="${esc(detail.thumbnail)}" alt="" loading="lazy" onerror="console.warn('[hotels-mcp] img failed:',this.src);this.remove()">`
     : "";
@@ -1090,19 +1135,20 @@ function renderRoomDetail(detail: HotelDetail): string {
   return `
     <div class="overlay-hero">
       <div class="overlay-hero-bg" style="background:${gradient}">${heroThumb}</div>
+      <div class="overlay-hero-top">
+        <span class="brand-badge" style="background:${theme.badge};color:${theme.badgeText}">${esc(detail.brand)}</span>
+      </div>
       <div class="overlay-hero-content">
         <div class="overlay-hotel-name">${esc(detail.name)}</div>
         <div class="overlay-hotel-meta">
-          <span class="brand-badge" style="background:${theme.badge};color:${theme.badgeText}">${esc(detail.brand)}</span>
           ${detail.rating > 0 ? `<span class="overlay-rating-badge" style="background:${ratingBg(detail.rating)}">${detail.rating.toFixed(1)}/10</span>` : ""}
-          <span class="overlay-city">${esc(detail.city)}${detail.country ? `<br><small>${esc(detail.country)}</small>` : ""}</span>
           ${stars > 0 ? `<span class="overlay-stars">${starsHtml(stars)}</span>` : ""}
         </div>
       </div>
     </div>
 
     <div class="overlay-body">
-      ${detail.address ? `
+      ${detail.address?.replace(/[\s.]+/g, "").length > 0 ? `
       <div class="overlay-address">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/>
@@ -1110,10 +1156,13 @@ function renderRoomDetail(detail: HotelDetail): string {
         <span>${esc(detail.address)}</span>
       </div>` : ""}
 
-      ${(detail.startingPrice ?? 0) > 0 ? `
+      ${((detail.startingPrice ?? 0) > 0 || bookingHref) ? `
       <div class="starting-callout">
-        <span class="starting-callout-label">Starting from</span>
-        <span class="starting-callout-price">${fmtPriceFull(detail.startingPrice!, detail.currency)}</span>
+        <div class="starting-callout-left">
+          <span class="starting-callout-label">Starting from</span>
+          ${(detail.startingPrice ?? 0) > 0 ? `<span class="starting-callout-price">${fmtPriceFull(detail.startingPrice!, detail.currency)}</span>` : ""}
+        </div>
+        ${bookingHref ? `<a href="${esc(bookingHref)}" class="book-now-btn">BOOK NOW</a>` : ""}
       </div>` : ""}
 
       <div class="section-title">Rooms &amp; Suites</div>
@@ -1127,8 +1176,12 @@ function renderRoomDetail(detail: HotelDetail): string {
 function renderRoomCard(room: RoomType, theme: BrandTheme, _brand: string): string {
   const bedType = deriveBedType(room.name);
 
+  const rawImg = room.roomImage ?? "";
+  const imgUrl = (rawImg.startsWith("https://") || rawImg.startsWith("/")) ? rawImg : "";
+
   return `
   <div class="room-card">
+    ${imgUrl ? `<img class="room-card-img" src="${esc(imgUrl)}" alt="${esc(room.name)}" loading="lazy">` : ""}
     <div class="room-card-header">
       <div style="flex:1;min-width:0">
         <div class="room-name">${esc(room.name)}</div>
@@ -1139,7 +1192,8 @@ function renderRoomCard(room: RoomType, theme: BrandTheme, _brand: string): stri
       </div>
       <div class="room-price-block">
         ${room.pricePerNight > 0
-          ? `<div class="room-price" style="color:${theme.accent}">${fmtPriceShort(room.pricePerNight, room.currency)}</div><div class="room-price-night">/night</div>`
+          ? `${ (room.baseRate ?? 0) > room.pricePerNight ? `<div class="room-price-original">${fmtPriceShort(room.baseRate, room.currency)}</div>` : ""}
+             <div class="room-price-row"><div class="room-price" style="color:#00215b">${fmtPriceShort(room.pricePerNight, room.currency)}</div><div class="room-price-night">/night</div></div>`
           : `<div class="room-price-night">Rate not Available</div>`
         }
       </div>
@@ -1155,6 +1209,12 @@ function showDashboard(data: DashboardData): void {
   hide("error-state");
   show("dashboard-content");
   if (state.allHotels.length > 0) populateFilters(state.allHotels);
+  const autoCity = data.destination || data.city || "";
+  if (autoCity) {
+    state.cityFilter = autoCity;
+    const citySel = document.getElementById("city-filter") as HTMLSelectElement | null;
+    if (citySel) citySel.value = autoCity;
+  }
   if (data.sortBy) {
     state.sortBy = data.sortBy;
     const sel = document.getElementById("sort-filter") as HTMLSelectElement | null;

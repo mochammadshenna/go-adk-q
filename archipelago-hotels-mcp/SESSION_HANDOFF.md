@@ -44,12 +44,12 @@ Makefile                      — build-ui (Vite), build-go, build, dev-http tar
 
 ## MCP Tools (CURRENT — critical)
 
-| Tool Name | File | Visibility | Purpose | Previously Was |
-|-----------|------|------------|---------|---------------|
-| `search_hotels` | `tools/search.go` | public | Search by city/brand/query; returns hotel list + prices | `find_hotels` |
-| `recommend_hotel` | `tools/recommend.go` | public | Rank hotels by vibe/budget/purpose | (unchanged) |
-| `find_hotels` | `tools/dashboard.go` | public | Browse/book all hotels with optional city/brand filter | `hotel_booking` |
-| `get_hotel_detail` | `tools/detail.go` | app | Full hotel detail + room types; called by UI only | (unchanged) |
+| Tool Name | File | Visibility | Purpose |
+|-----------|------|------------|---------|
+| `search_hotels` | `tools/search.go` | public | Search by city/brand/query; returns hotel list + prices |
+| `recommend_hotel` | `tools/recommend.go` | public | Rank hotels by vibe/budget/purpose |
+| `find_hotels` | `tools/dashboard.go` | public | Browse/book all hotels with optional city/brand filter |
+| `get_hotel_detail` | `tools/detail.go` | app | Full hotel detail + room types; called by UI only |
 
 ---
 
@@ -86,9 +86,27 @@ Makefile                      — build-ui (Vite), build-go, build, dev-http tar
 
 - MIMEType: `text/html;profile=mcp-app`
 - Resource URI: `ui://hotel-dashboard`
-- Tools link via `_meta.ui.resourceUri` + `resourceDomains: ["images.archipelagohotels.com"]`
-- `fmtPrice(v, currency)`: raw currency code from `hotel_currency` + `toLocaleString(id-ID for IDR)` → renders as "IDR 406.000"
+- Tools link via `_meta.ui.resourceUri` + `_meta.ui.csp.resourceDomains` (MUST be nested under `csp` key)
+- `fmtPrice(v, currency)`: raw currency code from `hotel_currency` + `toLocaleString(id-ID for IDR)`
 - Thumbnails: `resizeImageURL()` rewrites CDN → `images.archipelagohotels.com` (no HTTP fetch, CSP-safe)
+
+### CSP Structure (critical — do not regress)
+
+All tools and the dashboard resource must use this exact nesting:
+
+```go
+Meta: mcp.Meta{
+    "ui": map[string]any{
+        "resourceUri": resources.ResourceURI,   // tools only
+        "csp": map[string]any{
+            "resourceDomains": pool.ImageDomains(), // MUST be under "csp"
+        },
+    },
+}
+```
+
+`resourceDomains` at `_meta.ui.resourceDomains` (wrong level) is silently ignored by Claude Desktop → images broken.
+`ImageDomains()` returns `https://`-prefixed origins (bare hostnames are invalid CSP directives).
 
 ---
 
@@ -104,29 +122,7 @@ Makefile                      — build-ui (Vite), build-go, build, dev-http tar
 | `DEBUG` | `0` | Set to `1` for debug logging |
 | `url_image_resizer` | `https://images.archipelagohotels.com/` | Image CDN proxy base URL |
 
----
-
-## Session Summary — 2026-06-21
-
-### Accomplished
-
-- Renamed tool `find_hotels` → `search_hotels` (search functionality)
-- Renamed tool `hotel_booking` → `find_hotels` (dashboard/booking UI tool)
-- Added `resourceDomains` to all 3 public tools that render images (`search_hotels`, `find_hotels`, `get_hotel_detail`) so CDN thumbnail URLs pass the MCP iframe CSP
-- Removed hardcoded `"Rp"` currency symbol; all tools now return raw `hotel_currency` from DB
-- Rebuilt binary at 23:20 — `bin/archipelago-hotels-mcp` is current
-- Updated `server.go` `ServerOptions.Instructions` to match new tool names
-
-### Files Changed This Session
-
-| File | Change |
-|------|--------|
-| `internal/tools/search.go` | Renamed tool `find_hotels` → `search_hotels`; added `resourceDomains` to tool Meta |
-| `internal/tools/dashboard.go` | Renamed tool `hotel_booking` → `find_hotels`; added `resourceDomains` to tool Meta |
-| `internal/tools/detail.go` | Added `resourceDomains` to tool Meta; replaced hardcoded `"Rp"` with `hotel.Currency` |
-| `internal/tools/recommend.go` | Replaced hardcoded `"Rp"` with `hotel.Currency` |
-| `internal/server/server.go` | Updated tool descriptions in `ServerOptions.Instructions` to match new tool names |
-| `bin/archipelago-hotels-mcp` | Rebuilt (make build, 2026-06-21 23:20) |
+Developers with matching local MySQL defaults need no `env{}` block in Claude Desktop config.
 
 ---
 
@@ -135,6 +131,66 @@ Makefile                      — build-ui (Vite), build-go, build, dev-http tar
 Aston, Grand Aston, The Alana, favehotels, Hotel Neo, Kamuela Villas, Quest, Harper, Huxley, Nordic, Four Corners, PBA (Powered By Archi)
 
 Brand DB prefixes: `aston`, `neo`, `fave`, `alana`, `harper`, `kamuela`, `quest`, `pba`
+
+Special case: `astonhotelsinternational` bucket → remapped to `astoninternational` in `resizeImageURL()`
+
+---
+
+## Rate & Room Pipeline (current)
+
+### Key structs
+
+```go
+// rate/rate.go
+type SBRate struct {
+    RoomName           string
+    RoomID             string  // RoomTypeCode from SB XML — matches tb_hrooms.sb_id
+    BeforeDiscountRate float64 // Base.AmountBeforeTax — rack rate before discount
+    TotalAfterTax      float64 // Total.AmountAfterTax  — final price
+}
+
+type RoomRate struct {
+    Name         string  `json:"name"`
+    RatePerNight float64 `json:"ratePerNight"`
+    BaseRate     float64 `json:"baseRate,omitempty"`
+    Source       string  `json:"source"`
+    RoomImage    string  `json:"roomImage,omitempty"` // from tb_hrooms
+}
+
+// rate/sentec.go — future use
+type SentechDayRate struct {
+    BaseRate  float64 `json:"base_rate"`
+    Discount  float64 `json:"discount"`
+    FinalRate float64 `json:"final_rate"`
+    TaxPrice  float64 `json:"tax_price"`
+}
+```
+
+### trySB() room enrichment flow
+1. SB XML API → `[]SBRate` with `RoomID` = `RoomTypeCode` attribute
+2. `GetRooms()` → `[]RoomRow` with `SBID` + `RoomImage`
+3. Match: `strconv.ParseInt(SBRate.RoomID)` == `RoomRow.SBID.Int64`
+4. Copy `RoomImage` + fallback room name into `RoomRate`
+
+### Room image column selection (room.go)
+- **PBA** (`brandPrefix == "pba"`): `COALESCE(thumbnail_desktop, '')` — no `room_image` column in `tb_room`
+- **Others**: `COALESCE(room_image, thumbnail_desktop, '')` — both guarded by `HasColumn`
+
+### PBA table
+`tb_room` (not `tb_hrooms`, not `tb_hroom`) — status col = `status`, val = `1`
+
+---
+
+## UI — Pricing & Display (current)
+
+- "START FROM" label on cards: `var(--text-2)`, 11px, weight 600
+- Starting-from price (green): `#2BC14B`
+- Rooms & Suites prices: fixed `#00215b` (dark blue)
+- Strikethrough condition: `(room.baseRate ?? 0) > room.pricePerNight`
+- Original price: red line-through `#e53e3e`, 12px
+- Brand badge: top-left of modal hero via `.overlay-hero-top { position:absolute; top:12px; left:14px }`
+- Badge colour: pastel via `pastel(c) = round(c*0.15 + 255*0.85)`
+- Room card thumbnail: `<img class="room-card-img">` 120px height, validated `https://` or `/` prefix
 
 ---
 
@@ -147,44 +203,79 @@ Brand DB prefixes: `aston`, `neo`, `fave`, `alana`, `harper`, `kamuela`, `quest`
 5. MCP Apps ext-apps protocol for UI
 6. `resizeImageURL` for CSP-safe thumbnails (no base64 proxy)
 7. Raw `hotel_currency` code (not hardcoded symbol map)
+8. `resourceDomains` under `_meta.ui.csp` (not `_meta.ui`) — ext-apps spec requirement
 
 ---
 
 ## Known Issues / Blockers
 
-- **Claude Desktop restart required**: Binary was rebuilt; Claude Desktop must be restarted to pick up the new tool names (`search_hotels`, `find_hotels`). Without restart, old tool names may still be cached.
-- **Tool competition**: Booking.com, Trivago, and Wyndham MCPs in Claude Desktop compete with our tools. User must set Custom Instructions to prioritise archipelago-hotels-mcp tools. Instructions should reference the new tool names.
-- **PBA rate data**: `db_pba` has no `hotel_channel` column and uses UUID `hotel_id`. Rate fetching for PBA hotels falls back to `hotel_starting_price` only.
-- **Sentec API dead path**: Zero hotels currently have `hotel_channel = 'SENTEC'`. The Sentec client is implemented but the code path is never exercised. No action needed until a hotel is migrated.
+- **Strikethrough base rate unverified**: `Base.AmountBeforeTax` in SB XML may be 0 or pre-tax (less than final). Run `DEBUG=1 make dev-http`, open hotel modal, check logs for `sb rate fields room=...` — confirm `parsed_before > parsed_total`. If always 0, need different SB XML field.
+- **Room images untested end-to-end**: `room_image` / `thumbnail_desktop` column presence unverified per brand. `HasColumn` guards prevent crashes but images may silently not appear.
+- **Tool competition**: Booking.com, Trivago, and Wyndham MCPs compete with our tools in Claude Desktop. Set Custom Instructions to prioritise archipelago-hotels-mcp.
+- **PBA rate data**: `db_pba` has no `hotel_channel` column. Rate fetching falls back to `hotel_starting_price` only.
+- **Sentec API dead path**: Zero hotels use Sentec. `SentechDayRate` struct ready; client not implemented.
+- **City filter not auto-selected**: UI shows "All Cities" even when `recommend_hotel`/`search_hotels` returns a destination.
 
 ---
 
 ## Pending Tasks
 
-1. **Verify thumbnails load** — test in Claude Desktop after restart; expected: hotel card images appear instead of gradient fallback color.
-2. **Verify currency format** — confirm UI renders "IDR 406.000" (raw code + id-ID locale), not blank or "Rp".
-3. **Validate tool names in Claude Desktop** — run TEST_PROMPT.md #1 and #6 to confirm `search_hotels` and `find_hotels` are resolved correctly after restart.
-4. **Update Claude Desktop Custom Instructions** — if still referencing old tool names (`find_hotels` for search, `hotel_booking`), update to current names.
-5. **Phase 5: Caching** — LRU cache for hotel profiles and rate responses (see PLAN.md §4 Phase 5). Not started.
-6. **Phase 6: Observability** — structured slog logging with request IDs (see PLAN.md §4 Phase 6). Not started.
-7. **Integration tests** — no automated test suite exists; manual only via TEST_PROMPT.md.
+1. **Verify strikethrough base rate** — run with `DEBUG=1`, check `sb rate fields` log. If `Base.AmountBeforeTax` is always 0, find correct SB XML rack-rate field.
+2. **Test room images** — open PBA hotel modal (thumbnail_desktop), non-PBA hotel (room_image or thumbnail_desktop fallback).
+3. **Fix city filter auto-select** — `ui/src/mcp-app.ts` → `showDashboard()` after `populateFilters()`:
+   ```ts
+   const autoCity = (data as any).destination || (data as any).city || "";
+   if (autoCity && citySel) { state.cityFilter = autoCity; citySel.value = autoCity; }
+   applyFilters();
+   ```
+4. **Phase 5: Caching** — LRU for hotel profiles and rates. Not started.
+5. **Phase 6: Observability** — structured slog with request IDs. Not started.
+6. **Integration tests** — no automated suite; manual only.
+
+---
+
+## Session Changes — 2026-06-22
+
+### This session (room images + rate pipeline)
+
+| File | Change |
+|------|--------|
+| `repository/repository.go` | `RoomRow` + `RoomImage string` |
+| `repository/room.go` | PBA table `tb_hroom` → `tb_room`; brand-aware image column selection; scanRoom 6th target |
+| `rate/rate.go` | `RoomRate` + `RoomImage`; `SBRate` + `RoomID`; `trySB()` room enrichment via sb_id match; `tryStored()` passes RoomImage; added `strconv` |
+| `rate/simplebooking.go` | `RoomRateXML` + `RoomTypeCode` attr; `SBRate.RoomID` populated; debug log for rate fields; added `log/slog` |
+| `rate/sentec.go` | `SentechDayRate` struct added |
+| `tools/detail.go` | `roomImage` key in room map |
+| `ui/src/mcp-app.ts` | `RoomType.roomImage?`; room card thumbnail; `.room-card-img` CSS; URL validation (`https://` or `/`) |
+
+### Earlier same day (UI pricing + badge)
+
+| File | Change |
+|------|--------|
+| `rate/simplebooking.go` | `AmountBeforeTax` added to `RateAmountXML`; `parseAmountAttr` → `parseAttr(string)`; `parseRatesBlock` uses `Base.AmountBeforeTax` |
+| `rate/rate.go` | `SBRate`: `AmountAfterTax` → `BeforeDiscountRate` + `TotalAfterTax` |
+| `ui/src/mcp-app.ts` | Badge top-left; pastel badge colour; room price `#00215b`; strikethrough pricing; "START FROM" 11px visible |
+| `DESIGN.md` | §5.7 modal price colour scheme |
+
+### Previous session (CSP / thumbnail fix)
+
+| File | Change |
+|------|--------|
+| `repository/repository.go` | `ImageDomains()` returns `https://`-prefixed origins |
+| `tools/dashboard.go` `tools/recommend.go` `tools/search.go` `tools/detail.go` `resources/dashboard.go` | `resourceDomains` moved under `csp` key |
 
 ---
 
 ## Build Commands
 
 ```bash
-# Full rebuild (UI + Go binary)
-make build-ui && make build-go
-
-# Or combined
-make build
-
-# HTTP dev mode (port 9011)
-make dev-http
+make build          # full rebuild — required after any mcp-app.ts edit
+make build-go       # Go only (fast)
+make dev-http       # HTTP mode :9011
+DEBUG=1 make dev-http  # with verbose debug logging
 ```
 
-After rebuilding, **restart Claude Desktop** to reload the MCP server binary.
+After rebuilding, restart Claude Desktop to reload the binary.
 
 ---
 
@@ -193,18 +284,17 @@ After rebuilding, **restart Claude Desktop** to reload the MCP server binary.
 | Item | State |
 |------|-------|
 | Branch | `main` |
-| Binary | Built — `bin/archipelago-hotels-mcp` (2026-06-21 23:20) |
-| Build status | Passing (`make build` succeeded) |
-| Test status | Manual only via TEST_PROMPT.md (no automated suite) |
-| DB connection | Requires local MySQL on `127.0.0.1:3306` with `db_archipelagowebsite` |
+| Binary | `bin/archipelago-hotels-mcp` — built 2026-06-22 20:30 |
+| Build | Passing |
+| Tests | Manual only |
+| DB | Local MySQL `127.0.0.1:3306`, `db_archipelagowebsite` |
 
 ---
 
 ## Next Session Checklist
 
-1. `git status && git branch` — confirm working tree state.
-2. Read `MEMORY.md` — architecture context and known pitfalls.
-3. Restart Claude Desktop if not already done since last binary build.
-4. Run TEST_PROMPT.md #10 (stdio cleanliness) — confirm binary is healthy.
-5. Run TEST_PROMPT.md #1 (full brand audit) — confirm thumbnails load and currency shows correctly.
-6. Proceed to highest-priority pending task above.
+1. `git status && git branch`
+2. Read `SESSION_HANDOFF.md` + `MEMORY.md`
+3. `DEBUG=1 make dev-http` → open hotel modal → check `sb rate fields` logs for base rate values
+4. Test room images in modal (PBA and non-PBA)
+5. Fix city filter auto-select if needed

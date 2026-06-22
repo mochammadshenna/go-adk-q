@@ -172,7 +172,35 @@ Gradient CSS classes for hotel cards are generated in Go (`brandImageStyle` in `
 
 Thumbnails are returned as paths from `pool.GetThumbnails`. `resizeImageURL` rewrites these paths to the `images.archipelagohotels.com` CDN proxy base URL before the data reaches the UI. The UI only sets `src` attributes on `<img>` tags; it never makes fetch/XHR calls to retrieve images. The MCP App CSP allows `images.archipelagohotels.com` via `resourceDomains`, so the browser can load thumbnails without a CSP violation.
 
-### 5.5 Currency formatting
+### 5.5 Booking URL resolution
+
+`GetBookingURL` in `internal/repository/hotel.go` resolves the online booking URL for a given hotel. It:
+
+1. Checks `HasColumn(prefix, "tb_hotels", "hotel_channel")` before querying — PBA's `db_pba` lacks this column.
+2. If present, reads `hotel_channel` (`SENTEC` → `hotel_sentec_booking`, `SB` → `hotel_simplebooking`).
+3. If absent (PBA), falls back directly to `hotel_simplebooking`.
+4. Guards each column read with `HasColumn` before the final SELECT.
+
+The result is returned as `bookingUrl` in the `get_hotel_detail` response.
+
+### 5.6 Book Now — browser opening from Electron
+
+The Claude Desktop MCP ext-app runs the UI in a sandboxed Electron `<webview>` / iframe. `window.open()`, `window.location.href`, `globalThis.openLink()`, and `postMessage` approaches all fail to open a system browser from inside this sandbox.
+
+The solution is `open_booking_url`, an app-only MCP tool registered in `internal/tools/open_url.go`. When the UI's "Book Now" button is clicked, the TypeScript calls `appRef.callServerTool({ name: "open_booking_url", arguments: { url } })`. The Go server process — running outside the sandbox — executes `exec.Command("open", url)` (macOS), `xdg-open` (Linux), or `rundll32 url.dll,FileProtocolHandler` (Windows).
+
+URL validation: only `http` and `https` schemes are accepted; all others return an error without executing any command.
+
+### 5.7 Modal price colour scheme
+
+The hotel detail modal uses two distinct price colours, decoupled from brand theming:
+
+- **"Starting from" callout** (`.starting-callout-price`): `#2BC14B` (green) — signals entry price at a glance.
+- **Rooms & Suites per-night rate** (`.room-price`): `#00215b` (Archipelago dark blue) — fixed across all brands, never uses `theme.accent`.
+
+Hotel card list view continues using `theme.accent` (brand colour) for its price. The modal diverges intentionally so room rates are visually consistent regardless of which brand is open.
+
+### 5.8 Currency formatting
 
 Currency is returned as the raw ISO code from `hotel_currency` (e.g. `IDR`, `USD`). The UI function `fmtPrice(value, currency)` calls `Number.toLocaleString('id-ID', { style: 'currency', currency })` for IDR and a standard format for other currencies. There is no hardcoded symbol map — `Intl.NumberFormat` handles new currencies without any code change.
 
@@ -251,3 +279,5 @@ These invariants must hold across all code changes:
 5. `//go:embed` embeds the compiled UI — `make build-ui` must run before `make build-go` to avoid a stale or missing embed target.
 6. The rate cache key does not include date parameters; today/tomorrow availability is always implied.
 7. `hotel_currency` is passed through raw; the server never converts or normalises currency codes.
+8. `GetBookingURL` must guard every optional column with `HasColumn` before querying — PBA's `db_pba` lacks `hotel_channel` and calling it causes a SQL error.
+9. `open_booking_url` must only accept `http`/`https` URLs and never execute user-supplied shell arguments beyond the validated URL string.

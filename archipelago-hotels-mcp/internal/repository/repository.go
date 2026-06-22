@@ -76,11 +76,12 @@ type HotelRow struct {
 
 // RoomRow is a room type from a per-brand database.
 type RoomRow struct {
-	Name     string
-	Rate     float64
-	SBID     sql.NullInt64
-	Status   string
-	SentecID sql.NullInt64
+	Name      string
+	Rate      float64
+	SBID      sql.NullInt64
+	Status    string
+	SentecID  sql.NullInt64
+	RoomImage string // room_image column from tb_hrooms
 }
 
 // BrandCredentials holds booking engine credentials from a brand DB.

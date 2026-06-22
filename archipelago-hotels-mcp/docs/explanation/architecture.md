@@ -211,7 +211,22 @@ When the MCP host (Claude) receives a tool result that carries `_meta.ui.resourc
 
 ### 4.4 Tool visibility
 
-`get_hotel_detail` is marked **app-only** by convention (its description states it is called by the UI only). It is not listed in the server's instructions shown to the model, so the model does not invoke it directly. The dashboard TypeScript calls it via the MCP `tools/call` method over the same transport session.
+`get_hotel_detail` and `open_booking_url` are marked **app-only** (`visibility: ["app"]`). They are not listed in the server's instructions shown to the model, so the model cannot invoke them directly. The dashboard TypeScript calls them via the MCP `tools/call` method over the same transport session.
+
+### 4.5 Booking URL opening — exec.Command pattern
+
+The Claude Desktop MCP ext-app renders the UI in a sandboxed Electron `<webview>`. All JavaScript-level browser opens (`window.open`, `location.href`, `globalThis.openLink`, `postMessage`) are blocked by the sandbox and cannot reach the system browser.
+
+`open_booking_url` (`internal/tools/open_url.go`) solves this by delegating the open to the Go server process, which runs outside the sandbox as a normal OS process:
+
+```
+UI "Book Now" click
+  → appRef.callServerTool("open_booking_url", { url })
+    → Go handler: exec.Command("open", url).Start()   // macOS
+      → System browser opens
+```
+
+URL validation (scheme must be `http` or `https`) runs before any exec call. The tool returns `{"ok": true}` on success.
 
 ### 4.5 structuredContent return pattern
 

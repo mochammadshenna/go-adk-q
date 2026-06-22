@@ -90,7 +90,8 @@ Developers building AI-assisted hospitality workflows who integrate hotel search
 | `search_hotels` | public | Search by city/brand/query; returns hotel list + prices |
 | `recommend_hotel` | public | Rank hotels by vibe/budget/purpose |
 | `find_hotels` | public | Browse all hotels with optional city/brand filter; opens UI |
-| `get_hotel_detail` | app-only (`visibility: app`) | Full hotel detail + room types; called by UI only |
+| `get_hotel_detail` | app-only (`visibility: app`) | Full hotel detail + room types + booking URL; called by UI only |
+| `open_booking_url` | app-only (`visibility: app`) | Open hotel booking URL in system browser; called by UI "Book Now" button |
 
 ---
 
@@ -171,6 +172,7 @@ Brand-specific `imageStyle` gradients are defined in `internal/repository/reposi
 | `internal/tools/recommend.go` | recommend_hotel handler |
 | `internal/tools/dashboard.go` | find_hotels handler |
 | `internal/tools/detail.go` | get_hotel_detail handler (app-only) |
+| `internal/tools/open_url.go` | open_booking_url handler (app-only; opens booking URL via exec.Command) |
 | `internal/resources/dashboard.go` | MCP resource registration |
 | `ui/src/mcp-app.ts` | TypeScript frontend (1200+ lines, single file) |
 | `Makefile` | `build-ui` (Vite), `build-go`, `build`, `dev-http` targets |
@@ -208,6 +210,7 @@ Brand-specific `imageStyle` gradients are defined in `internal/repository/reposi
 | 5 | MCP Apps ext-apps protocol for UI |
 | 6 | resizeImageURL for CSP-safe thumbnails (no base64 proxy) |
 | 7 | Raw hotel_currency code (not hardcoded symbol map) |
+| 8 | open_booking_url via exec.Command — Electron iframe sandbox blocks window.open(); server-side OS command is the only reliable cross-platform path |
 
 ---
 

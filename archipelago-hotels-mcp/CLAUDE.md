@@ -44,6 +44,7 @@ Any edit to `ui/src/mcp-app.ts` requires `make build` (not `make build-go`).
 | `internal/tools/recommend.go` | `recommend_hotel` handler |
 | `internal/tools/dashboard.go` | `find_hotels` handler |
 | `internal/tools/detail.go` | `get_hotel_detail` handler (app-only) |
+| `internal/tools/open_url.go` | `open_booking_url` handler (app-only; `exec.Command` browser open) |
 | `internal/resources/dashboard.go` | MCP resource registration |
 | `internal/resources/mcp-app.html` | Embedded UI (generated — do not edit directly) |
 | `ui/src/mcp-app.ts` | TypeScript frontend source (~1200 lines, single file) |
@@ -55,7 +56,8 @@ Any edit to `ui/src/mcp-app.ts` requires `make build` (not `make build-go`).
 | `search_hotels` | public | Search by city / brand / query; returns hotel list + prices |
 | `recommend_hotel` | public | Rank hotels by vibe / budget / purpose |
 | `find_hotels` | public | Browse all hotels with optional city / brand filter |
-| `get_hotel_detail` | app-only (`visibility: app`) | Full detail + room types; called by UI only |
+| `get_hotel_detail` | app-only (`visibility: app`) | Full detail + room types + `bookingUrl`; called by UI only |
+| `open_booking_url` | app-only (`visibility: app`) | Open booking URL in system browser via `exec.Command`; bypasses Electron iframe sandbox |
 
 ## Data Architecture
 
@@ -131,3 +133,4 @@ Any edit to `ui/src/mcp-app.ts` requires `make build` (not `make build-go`).
 | 5 | MCP Apps ext-apps protocol for UI |
 | 6 | resizeImageURL for CSP-safe thumbnails (no base64 proxy) |
 | 7 | Raw hotel_currency code (not hardcoded symbol map) |
+| 8 | open_booking_url via exec.Command (not window.open) — Electron iframe sandbox blocks all JS-level browser opens |

@@ -10,6 +10,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"sync"
 	"time"
 
@@ -22,6 +23,7 @@ type RoomRate struct {
 	RatePerNight float64 `json:"ratePerNight"`
 	BaseRate     float64 `json:"baseRate,omitempty"` // before discount (SB only)
 	Source       string  `json:"source"`             // "simplebooking", "stored", "starting_price"
+	RoomImage    string  `json:"roomImage,omitempty"` // from tb_hrooms.room_image
 }
 
 // Service fetches room rates with automatic fallback and caching.
@@ -112,15 +114,37 @@ func (s *Service) trySB(ctx context.Context, dbPrefix string, apiHotelID int, ch
 		return nil
 	}
 
+	// Fetch stored rooms to enrich SB rates with room images (matched by sb_id).
+	storedRooms, _ := s.pool.GetRooms(ctx, dbPrefix, apiHotelID)
+	sbRoomByID := make(map[int64]repository.RoomRow, len(storedRooms))
+	for _, sr := range storedRooms {
+		if sr.SBID.Valid {
+			sbRoomByID[sr.SBID.Int64] = sr
+		}
+	}
+
 	slog.Info("rate: simplebooking live", "prefix", dbPrefix, "hotel_id", apiHotelID, "rooms", len(sbRates))
 	result := make([]RoomRate, len(sbRates))
 	for i, r := range sbRates {
-		result[i] = RoomRate{
+		rr := RoomRate{
 			Name:         r.RoomName,
 			RatePerNight: r.TotalAfterTax,
-			BaseRate:     r.AmountAfterTax,
+			BaseRate:     r.BeforeDiscountRate,
 			Source:       "simplebooking",
 		}
+		if r.RoomID != "" {
+			if id, err := strconv.ParseInt(r.RoomID, 10, 64); err == nil {
+				if stored, ok := sbRoomByID[id]; ok {
+					if stored.RoomImage != "" {
+						rr.RoomImage = stored.RoomImage
+					}
+					if rr.Name == "" {
+						rr.Name = stored.Name
+					}
+				}
+			}
+		}
+		result[i] = rr
 	}
 	return result
 }
@@ -143,6 +167,7 @@ func (s *Service) tryStored(ctx context.Context, dbPrefix string, apiHotelID int
 				Name:         r.Name,
 				RatePerNight: r.Rate,
 				Source:       "stored",
+				RoomImage:    r.RoomImage,
 			})
 		}
 	}
@@ -269,9 +294,10 @@ type SBClient struct {
 
 // SBRate is a single room rate from SimpleBooking.
 type SBRate struct {
-	RoomName       string
-	AmountAfterTax float64
-	TotalAfterTax  float64
+	RoomName           string
+	RoomID             string  // RoomTypeCode from XML — matches tb_hrooms.sb_id
+	BeforeDiscountRate float64 // Base.AmountBeforeTax — rack rate before discount
+	TotalAfterTax      float64 // Total.AmountAfterTax  — final price
 }
 
 // NewSBClient creates a client targeting the production SimpleBooking endpoint.

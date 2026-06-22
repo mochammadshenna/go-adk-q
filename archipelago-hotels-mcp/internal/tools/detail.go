@@ -63,6 +63,11 @@ func detailHandler(pool *repository.Pool, rateSvc *rate.Service) func(context.Co
 		}
 
 		thumbMap := pool.GetThumbnails(ctx, []repository.HotelRow{*h})
+		bookingURL := ""
+		if h.DBPrefix != "" && h.APIHotelID.Valid {
+			bookingURL = pool.GetBookingURL(ctx, h.DBPrefix, int(h.APIHotelID.Int64))
+		}
+
 		detail := map[string]any{
 			"id":         fmt.Sprintf("%d", h.HotelID),
 			"name":       h.Name,
@@ -78,6 +83,7 @@ func detailHandler(pool *repository.Pool, rateSvc *rate.Service) func(context.Co
 			"imageStyle": h.ImageStyle,
 			"brandColor": h.BrandColor,
 			"thumbnail":  thumbMap[h.HotelID],
+			"bookingUrl": bookingURL,
 		}
 
 		if h.APIHotelID.Valid && h.DBPrefix != "" {
@@ -92,6 +98,7 @@ func detailHandler(pool *repository.Pool, rateSvc *rate.Service) func(context.Co
 						"currency":      h.Currency,
 						"maxGuests":     2,
 						"rateSource":    r.Source,
+						"roomImage":     r.RoomImage,
 					})
 				}
 				detail["roomTypes"] = roomTypes

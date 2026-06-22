@@ -148,6 +148,55 @@ func (p *Pool) GetHotelByAPIID(ctx context.Context, apiHotelID int) (*HotelRow, 
 	return scanSingleHotel(p.central.QueryRowContext(ctx, query, apiHotelID))
 }
 
+// GetBookingURL fetches the booking URL from the brand DB based on hotel_channel:
+// SENTEC → hotel_sentec_booking, SB → hotel_simplebooking.
+func (p *Pool) GetBookingURL(ctx context.Context, prefix string, apiHotelID int) string {
+	db := p.BrandDB(ctx, prefix)
+	if db == nil {
+		return ""
+	}
+
+	var col string
+	if p.HasColumn(prefix, "tb_hotels", "hotel_channel") {
+		var channel string
+		if err := db.QueryRowContext(ctx,
+			"SELECT COALESCE(hotel_channel,'') FROM tb_hotels WHERE hotel_id = ? LIMIT 1",
+			apiHotelID,
+		).Scan(&channel); err != nil {
+			return ""
+		}
+		switch channel {
+		case "SENTEC":
+			if !p.HasColumn(prefix, "tb_hotels", "hotel_sentec_booking") {
+				return ""
+			}
+			col = "hotel_sentec_booking"
+		case "SB":
+			if !p.HasColumn(prefix, "tb_hotels", "hotel_simplebooking") {
+				return ""
+			}
+			col = "hotel_simplebooking"
+		default:
+			return ""
+		}
+	} else {
+		// hotel_channel column absent — fall back to SB (primary booking engine)
+		if !p.HasColumn(prefix, "tb_hotels", "hotel_simplebooking") {
+			return ""
+		}
+		col = "hotel_simplebooking"
+	}
+
+	var bookingURL string
+	if err := db.QueryRowContext(ctx,
+		"SELECT COALESCE("+col+",'') FROM tb_hotels WHERE hotel_id = ? LIMIT 1",
+		apiHotelID,
+	).Scan(&bookingURL); err != nil {
+		return ""
+	}
+	return bookingURL
+}
+
 // ListRegions returns distinct region names for dashboard filters.
 func (p *Pool) ListRegions(ctx context.Context) ([]string, error) {
 	rows, err := p.central.QueryContext(ctx,
@@ -421,3 +470,4 @@ func scanSingleHotel(row *sql.Row) (*HotelRow, error) {
 	}
 	return &h, nil
 }
+

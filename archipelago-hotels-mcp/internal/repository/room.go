@@ -21,7 +21,7 @@ func (p *Pool) GetRooms(ctx context.Context, brandPrefix string, apiHotelID int)
 
 	// PBA uses a different table and column naming.
 	if brandPrefix == "pba" {
-		table = "tb_hroom"
+		table = "tb_room"
 		statusCol = "status"
 		statusVal = "1"
 	}
@@ -47,6 +47,27 @@ func (p *Pool) GetRooms(ctx context.Context, brandPrefix string, apiHotelID int)
 		cols = append(cols, "sentec_id")
 	} else {
 		cols = append(cols, "NULL")
+	}
+	// PBA: use thumbnail_desktop only. Others: room_image with thumbnail_desktop fallback.
+	if brandPrefix == "pba" {
+		if p.HasColumn(brandPrefix, table, "thumbnail_desktop") {
+			cols = append(cols, "COALESCE(thumbnail_desktop, '')")
+		} else {
+			cols = append(cols, "''")
+		}
+	} else {
+		hasImg := p.HasColumn(brandPrefix, table, "room_image")
+		hasThumb := p.HasColumn(brandPrefix, table, "thumbnail_desktop")
+		switch {
+		case hasImg && hasThumb:
+			cols = append(cols, "COALESCE(room_image, thumbnail_desktop, '')")
+		case hasImg:
+			cols = append(cols, "COALESCE(room_image, '')")
+		case hasThumb:
+			cols = append(cols, "COALESCE(thumbnail_desktop, '')")
+		default:
+			cols = append(cols, "''")
+		}
 	}
 
 	query := fmt.Sprintf(`SELECT %s FROM %s WHERE hotel_id = ? AND %s = ? ORDER BY room_name`,
@@ -76,12 +97,12 @@ func (p *Pool) GetRooms(ctx context.Context, brandPrefix string, apiHotelID int)
 func scanRoom(scanner interface{ Scan(dest ...any) error }) (RoomRow, error) {
 	var r RoomRow
 	var rateFloat sql.NullFloat64
-	cols := []any{&r.Name, &rateFloat, &r.SBID, &r.Status, &r.SentecID}
+	cols := []any{&r.Name, &rateFloat, &r.SBID, &r.Status, &r.SentecID, &r.RoomImage}
 	if err := scanner.Scan(cols...); err != nil {
 		// Some DBs store room_rate as INT rather than DECIMAL; retry.
 		if strings.Contains(err.Error(), "converting") {
 			var rateInt sql.NullInt64
-			alt := []any{&r.Name, &rateInt, &r.SBID, &r.Status, &r.SentecID}
+			alt := []any{&r.Name, &rateInt, &r.SBID, &r.Status, &r.SentecID, &r.RoomImage}
 			if err2 := scanner.Scan(alt...); err2 == nil && rateInt.Valid {
 				r.Rate = float64(rateInt.Int64)
 				return r, nil

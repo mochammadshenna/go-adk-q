@@ -5,6 +5,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -111,26 +112,29 @@ func parseSBResponse(rawXML []byte) ([]SBRate, error) {
 }
 
 // parseRatesBlock extracts a single SBRate from a RoomRate XML element.
-// It uses the first Rate child's Base and Total AmountAfterTax.
+// Base.AmountBeforeTax = rack rate (before discount).
+// Total.AmountAfterTax  = final price after discount.
 func parseRatesBlock(rr RoomRateXML) *SBRate {
 	if rr.Rates == nil || len(rr.Rates.Rate) == 0 {
 		return nil
 	}
 	first := rr.Rates.Rate[0]
-	amount := parseAmountAttr(first.Base)
-	total := parseAmountAttr(first.Total)
-	if amount == 0 && total == 0 {
+	beforeDiscount := parseAttr(first.Base.AmountBeforeTax)
+	total := parseAttr(first.Total.AmountAfterTax)
+	slog.Debug("sb rate fields", "room", rr.RoomName, "Base.BeforeTax", first.Base.AmountBeforeTax, "Base.AfterTax", first.Base.AmountAfterTax, "Total.AfterTax", first.Total.AmountAfterTax, "parsed_before", beforeDiscount, "parsed_total", total)
+	if beforeDiscount == 0 && total == 0 {
 		return nil
 	}
 	return &SBRate{
-		RoomName:       rr.RoomName,   // may be empty in SB response
-		AmountAfterTax: amount,
-		TotalAfterTax:  total,
+		RoomName:           rr.RoomName,
+		RoomID:             rr.RoomTypeCode,
+		BeforeDiscountRate: beforeDiscount,
+		TotalAfterTax:      total,
 	}
 }
 
-func parseAmountAttr(e RateAmountXML) float64 {
-	v := strings.TrimSpace(e.AmountAfterTax)
+func parseAttr(s string) float64 {
+	v := strings.TrimSpace(s)
 	if v == "" {
 		return 0
 	}
@@ -166,8 +170,9 @@ type RoomRatesXML struct {
 }
 
 type RoomRateXML struct {
-	RoomName string     `xml:",attr"` // may be on RoomRate element itself
-	Rates    *RatesXML `xml:"Rates"`
+	RoomTypeCode string    `xml:"RoomTypeCode,attr"` // SB room ID — matches tb_hrooms.sb_id
+	RoomName     string    `xml:",attr"`
+	Rates        *RatesXML `xml:"Rates"`
 }
 
 type RatesXML struct {
@@ -180,5 +185,6 @@ type RateXML struct {
 }
 
 type RateAmountXML struct {
-	AmountAfterTax string `xml:"AmountAfterTax,attr"`
+	AmountBeforeTax string `xml:"AmountBeforeTax,attr"`
+	AmountAfterTax  string `xml:"AmountAfterTax,attr"`
 }

@@ -94,8 +94,11 @@ UI and Go binary are independent artifacts.
 | `recommend_hotel` | public | Any MCP client |
 | `find_hotels` | public | Any MCP client |
 | `get_hotel_detail` | `app` only | Embedded UI (`mcp-app.ts`) only |
+| `open_booking_url` | `app` only | Embedded UI (`mcp-app.ts`) only |
 
 `get_hotel_detail` visibility must never be promoted to `public`.
+
+`open_booking_url` opens the booking URL in the system browser via `exec.Command("open"/"xdg-open"/"rundll32")` in the Go server process. This is required because the Claude Desktop MCP ext-app iframe sandbox blocks `window.open()` and `window.location.href`. Never expose this tool publicly.
 
 ### Central DB Partition Filtering
 
@@ -236,6 +239,7 @@ Architecture decision history is in `DESIGN.md` as numbered ADR entries. When yo
 | `internal/tools/recommend.go` | `recommend_hotel` handler |
 | `internal/tools/dashboard.go` | `find_hotels` handler |
 | `internal/tools/detail.go` | `get_hotel_detail` handler (app-only visibility) |
+| `internal/tools/open_url.go` | `open_booking_url` handler (app-only; opens URL via `exec.Command` to bypass Electron sandbox) |
 | `internal/resources/dashboard.go` | MCP resource registration; `//go:embed mcp-app.html` |
 | `internal/resources/mcp-app.html` | **Generated — do not edit by hand** |
 | `ui/src/mcp-app.ts` | TypeScript frontend (single file, ~1200 lines) |

@@ -16,6 +16,7 @@ Archipelago Hotels MCP server — tool reference for **archipelago-hotels-mcp**.
 - [recommend_hotel](#recommend_hotel)
 - [find_hotels](#find_hotels)
 - [get_hotel_detail](#get_hotel_detail)
+- [open_booking_url](#open_booking_url)
 - [Error conditions](#error-conditions)
 
 ---
@@ -459,6 +460,16 @@ When room data is **not** available but `hotel_starting_price > 0`:
 }
 ```
 
+`bookingUrl` field (present when the brand DB has a booking URL configured):
+
+```jsonc
+{
+  "bookingUrl": "string"  // direct booking URL; empty string or absent when unavailable
+}
+```
+
+`bookingUrl` is resolved by `GetBookingURL` in `internal/repository/hotel.go`. It reads `hotel_channel` from the brand DB (`SENTEC` → `hotel_sentec_booking` column, `SB` → `hotel_simplebooking` column). For brand DBs that lack `hotel_channel` (PBA), it falls back to `hotel_simplebooking` directly. The UI renders a "Book Now" button when this field is non-empty.
+
 ### Example request
 
 ```json
@@ -515,6 +526,54 @@ When room data is **not** available but `hotel_starting_price > 0`:
 | Hotel not found in DB | Returns error: `"hotel not found: <hotelId>"` |
 | DB unavailable | Returns error: `"database error: <db error>"` |
 | Internal panic | Recovered; returns error: `"internal error: <panic value>"` |
+
+---
+
+## open_booking_url
+
+**Visibility**: app-only (`visibility: ["app"]` — hidden from LLM tool list)
+
+### Description
+
+Opens a hotel booking URL in the system browser. Called by the dashboard UI when the user clicks the "Book Now" button. Uses `exec.Command` in the Go server process to bypass the Electron iframe sandbox, which blocks all JavaScript-level browser opens (`window.open`, `location.href`, etc.).
+
+### Input schema
+
+```jsonc
+{
+  "type": "object",
+  "properties": {
+    "url": { "type": "string", "description": "The booking URL to open." }
+  },
+  "required": ["url"]
+}
+```
+
+| Parameter | Type | Required | Notes |
+|-----------|------|----------|-------|
+| `url` | string | **yes** | Must be `http` or `https` scheme. Any other scheme returns an error without executing. |
+
+### OS dispatch
+
+| OS | Command |
+|----|---------|
+| macOS | `open <url>` |
+| Linux | `xdg-open <url>` |
+| Windows | `rundll32 url.dll,FileProtocolHandler <url>` |
+
+### Response structure
+
+```jsonc
+{ "ok": true }
+```
+
+### Error conditions
+
+| Condition | Behaviour |
+|-----------|-----------|
+| Non-http/https URL | Returns error: `"invalid URL"` — no exec call made |
+| `cmd.Start()` failure | Returns error: `"open failed: <os error>"` |
+| Unsupported OS | Returns error: `"unsupported OS: <runtime.GOOS>"` |
 
 ---
 

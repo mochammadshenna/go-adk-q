@@ -22,7 +22,8 @@ Go MCP server for Archipelago Hotels & Resorts (Sentec Tech product). Searches 2
 | search_hotels | public | Search by city/brand/query; returns hotel list + prices |
 | recommend_hotel | public | Rank hotels by vibe/budget/purpose |
 | find_hotels | public | Browse/book all hotels with optional city/brand filter |
-| get_hotel_detail | app-only (visibility: app) | Full hotel detail + room types; called by UI only |
+| get_hotel_detail | app-only (visibility: app) | Full hotel detail + room types + bookingUrl; called by UI only |
+| open_booking_url | app-only (visibility: app) | Opens booking URL in system browser via exec.Command — bypasses Electron iframe sandbox |
 
 ### Data Architecture
 
@@ -80,7 +81,8 @@ Go MCP server for Archipelago Hotels & Resorts (Sentec Tech product). Searches 2
 | internal/tools/search.go | search_hotels handler |
 | internal/tools/recommend.go | recommend_hotel handler |
 | internal/tools/dashboard.go | find_hotels handler |
-| internal/tools/detail.go | get_hotel_detail handler (app-only) |
+| internal/tools/detail.go | get_hotel_detail handler (app-only); emits bookingUrl |
+| internal/tools/open_url.go | open_booking_url handler — exec.Command("open", url) per OS |
 | internal/resources/dashboard.go | MCP resource registration |
 | ui/src/mcp-app.ts | TypeScript frontend (1200+ lines, single file) |
 | Makefile | build-ui (Vite), build-go, build, dev-http targets |
@@ -178,11 +180,26 @@ Every MCP tool handler has a deferred `recover()` at the top. A nil pointer from
 
 ## Brand DB Special Cases
 
+### Booking URL lookup (GetBookingURL)
+`hotel.go:GetBookingURL(ctx, prefix, apiHotelID)` queries the brand DB:
+1. `HasColumn(prefix, "tb_hotels", "hotel_channel")` — PBA lacks this column; fallback to `hotel_simplebooking` directly
+2. `hotel_channel = 'SENTEC'` → query `hotel_sentec_booking`
+3. `hotel_channel = 'SB'` → query `hotel_simplebooking`
+4. Returns `""` if channel unknown or URL column empty/missing
+Called only in `detail.go` — never in `SearchHotels` (would require N brand DB queries per list call).
+
+### Open booking URL (open_booking_url tool)
+`tools/open_url.go` — app-only MCP tool. Validates http/https scheme, then:
+- macOS: `exec.Command("open", url)`
+- Linux: `exec.Command("xdg-open", url)`
+- Windows: `exec.Command("rundll32", "url.dll,FileProtocolHandler", url)`
+UI calls this via `appRef.callServerTool(...)` — the MCP server process runs outside Claude Desktop's iframe sandbox so it can open system browser.
+
 ### PBA (Powered By Archi)
 - Table: `tb_hroom` (singular, no `s`)
 - Primary key: UUID `CHAR(36)`, not `INT`
 - Status column: `"status"` (not `"room_status"`), active value `"1"` (not `"Y"`)
-- Lacks `hotel_channel`; treat all PBA hotels as SimpleBooking-only
+- Lacks `hotel_channel`; `GetBookingURL` falls back to `hotel_simplebooking` for PBA
 
 ### brandDBName map (repository/repository.go)
 The `db_prefix_name` column in `tb_brands` does not always match the literal DB name:

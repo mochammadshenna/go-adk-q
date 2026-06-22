@@ -68,6 +68,7 @@ Search, recommend, and explore hotels across 13 Archipelago brands (Aston, The A
 	tools.RegisterDetail(s, svc.DB, svc.RateSvc)
 	tools.RegisterRecommend(s, svc.DB, svc.RateSvc)
 	tools.RegisterDashboardTool(s, svc.DB, svc.RateSvc)
+	tools.RegisterOpenURL(s)
 
 	resources.RegisterDashboardResource(s, dbPool.ImageDomains())
 
