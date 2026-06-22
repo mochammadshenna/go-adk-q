@@ -15,7 +15,7 @@
 5. [BatchMinRates and the worker pool](#5-batchminrates-and-the-worker-pool)
 6. [Fallback to starting_price](#6-fallback-to-starting_price)
 7. [Full sequence diagram: BatchMinRates for 3 hotels](#7-full-sequence-diagram-batchminrates-for-3-hotels)
-8. [Known limitation: dates are always today/tomorrow](#8-known-limitation-dates-are-always-todaytomorrow)
+8. [Date handling in get_hotel_detail](#8-date-handling-in-get_hotel_detail)
 
 ---
 
@@ -26,12 +26,11 @@ Not every Archipelago hotel uses the same booking engine, and not every booking 
 | Source | When available | Data freshness |
 |--------|---------------|----------------|
 | SimpleBooking live XML API | Hotel has `simplebooking_id`, `xml_user`, `xml_pass` in brand DB; circuit breaker closed | Real-time: prices reflect current availability and promotions |
+| Sentec REST API | Hotel has `hotel_channel = 'SENTEC'` and `sentec_booking_id` in brand DB | Real-time: prices from the Sentec Booking Engine |
 | Stored `tb_hrooms.room_rate` | Hotel has rows in brand DB with `room_rate > 0` | Stale: updated manually or by a nightly sync job; may be months old |
 | `hotel_starting_price` (central DB) | Always: every hotel has this column | Indicative: a marketing "from" price, not an actual bookable rate |
 
 The fallback chain exists because the MCP tools must return _some_ price for every hotel. A hotel card with no price is useless to the model and the user. The chain degrades gracefully: live rates when possible, stale rates when the API is unavailable, indicative price as a last resort.
-
-The Sentec REST API is reserved in the code (`internal/rate/sentec.go`) but currently unused: zero hotels have Sentec credentials in production. It would slot in between SimpleBooking and stored rates in the fallback chain when activated.
 
 ---
 
@@ -156,10 +155,10 @@ The circuit breaker uses a `sync.Mutex`. `Allow()`, `Failure()`, and `Success()`
 ### Key structure
 
 ```
-key = dbPrefix + ":" + apiHotelID
+key = dbPrefix + ":" + apiHotelID + ":" + checkIn + ":" + checkOut
 ```
 
-Examples: `"aston:1042"`, `"neo:87"`. This key is unique per hotel because `apiHotelID` is scoped to the brand database.
+Examples: `"aston:1042:2026-06-23:2026-06-24"`, `"neo:87:2026-06-23:2026-06-24"`. The key includes stay dates so that calls for different date ranges do not share a cache slot. Date normalisation (empty string → today/tomorrow) runs **before** the cache lookup, so omitting dates and passing the same explicit date produce the same key.
 
 ### TTL: 5 minutes
 
@@ -370,9 +369,9 @@ sequenceDiagram
 
 ---
 
-## 8. Known limitation: dates are always today/tomorrow
+## 8. Date handling in get_hotel_detail
 
-When `checkIn` and `checkOut` are empty strings (the default for all MCP tool calls), `GetRates` substitutes today and tomorrow:
+`get_hotel_detail` accepts optional `checkIn` and `checkOut` parameters (`YYYY-MM-DD`). When omitted or empty, `GetRates` substitutes today and tomorrow:
 
 ```go
 if checkIn == "" || checkOut == "" {
@@ -382,17 +381,6 @@ if checkIn == "" || checkOut == "" {
 }
 ```
 
-This means all rates returned by the MCP tools are for a one-night stay starting tonight, regardless of when the user actually intends to travel. If a user asks "find hotels in Bali for next month", the prices shown are tonight's rates.
+Date normalisation runs **before** the cache lookup, so a call with no dates and a call with today's explicit date string produce the same cache key and share a cached result.
 
-**Why this is acceptable for now.** The primary use case is recommendation and discovery, not booking. The user sees prices as rough indicators of a hotel's tier. The `source` field on each `RoomRate` ("simplebooking", "stored", "starting_price") lets a caller know how to qualify the figure.
-
-**Why it is not trivially fixed.** The MCP tool input schemas do not include date parameters. Adding them would require:
-
-1. Extending the input schema for `search_hotels`, `recommend_hotel`, and `find_hotels`.
-2. Parsing and validating date strings from the model.
-3. Propagating the dates through `BatchMinRates` → `GetRates`.
-4. Changing the cache key to include dates (otherwise today's rate would be served for future dates).
-
-The cache key change is the most significant impact: adding dates to the key would make the 5-minute TTL far less effective, since each unique date pair would be a distinct entry. A date-aware cache would need either a longer TTL (appropriate for advance searches) or a per-hotel, per-date-range structure with bounded size.
-
-This is tracked as a future work item. The current behaviour is documented in the tool descriptions shown to Claude so the model can qualify price claims appropriately.
+The list tools (`search_hotels`, `recommend_hotel`, `find_hotels`) do not accept date parameters. Rates in list results always reflect a one-night stay starting tonight. This is acceptable for discovery and recommendation use cases, where prices are tier indicators rather than exact booking quotes. The `source` field on each `RoomRate` lets the caller qualify the figure appropriately.

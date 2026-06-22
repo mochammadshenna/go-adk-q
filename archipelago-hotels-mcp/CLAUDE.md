@@ -35,11 +35,11 @@ Any edit to `ui/src/mcp-app.ts` requires `make build` (not `make build-go`).
 | `internal/server/server.go` | MCP server wiring + Gin HTTP routes |
 | `internal/repository/repository.go` | Pool, Config, HotelRow, BrandRow, RoomRow types |
 | `internal/repository/hotel.go` | SearchHotels, GetHotelByID, GetThumbnails, resizeImageURL |
-| `internal/repository/room.go` | GetRooms (schema-adaptive), GetCredentials |
+| `internal/repository/room.go` | GetRooms (schema-adaptive), GetCredentials, GetSentecCredentials |
 | `internal/rate/rate.go` | Service, BatchMinRates, circuitBreaker, SBClient |
 | `internal/rate/cache.go` | rateCache (TTL, lazy expiry, no goroutine) |
 | `internal/rate/simplebooking.go` | XML builder + parser for SimpleBooking API |
-| `internal/rate/sentec.go` | Sentec REST client (reserved, 0 hotels active) |
+| `internal/rate/sentec.go` | Sentec REST client (active; `hotel_channel = 'SENTEC'`) |
 | `internal/tools/search.go` | `search_hotels` handler |
 | `internal/tools/recommend.go` | `recommend_hotel` handler |
 | `internal/tools/dashboard.go` | `find_hotels` handler |
@@ -69,8 +69,9 @@ Any edit to `ui/src/mcp-app.ts` requires `make build` (not `make build-go`).
 ## Rate Fallback Chain (priority order)
 
 1. SimpleBooking XML API (live) — `OTA_HotelAvailRQ`, 5-worker bounded pool, 5-min TTL cache, circuit breaker (5 failures → 120 s cooldown)
-2. `tb_hrooms.room_rate` (stored) — per-brand DB fallback
-3. `hotel_starting_price` (central DB) — last resort
+2. Sentec REST API (live) — `hotel_channel = 'SENTEC'`; credentials from `credential_booking_engines WHERE code='SENTEC'` (brand DB), fallback to `SENTEC_USER`/`SENTEC_PASS` env vars
+3. `tb_hrooms.room_rate` (stored) — per-brand DB fallback
+4. `hotel_starting_price` (central DB) — last resort
 
 ## HTTP Endpoints (HTTP mode)
 
@@ -94,6 +95,8 @@ Any edit to `ui/src/mcp-app.ts` requires `make build` (not `make build-go`).
 | `MYSQL_DB` | `db_archipelagowebsite` | Central DB name |
 | `DEBUG` | `0` | Set `1` for debug logging |
 | `url_image_resizer` | `https://images.archipelagohotels.com/` | Image CDN proxy base URL |
+| `SENTEC_USER` | `website@archipelagointernational.com` | Sentec API username (env fallback when brand DB has no SENTEC credential) |
+| `SENTEC_PASS` | `NllhBd0GHC7V2w` | Sentec API password (env fallback when brand DB has no SENTEC credential) |
 
 ## Architecture Rules
 
@@ -128,7 +131,7 @@ Any edit to `ui/src/mcp-app.ts` requires `make build` (not `make build-go`).
 |---|----------|
 | 1 | Go + go-sdk for MCP (not Node.js) |
 | 2 | Multi-DB Pool with lazy connect (not single DB) |
-| 3 | Rate fallback chain (SB → stored → starting_price) |
+| 3 | Rate fallback chain (SB → Sentec → stored → starting_price) |
 | 4 | Gin for HTTP transport |
 | 5 | MCP Apps ext-apps protocol for UI |
 | 6 | resizeImageURL for CSP-safe thumbnails (no base64 proxy) |

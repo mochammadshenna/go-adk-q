@@ -409,6 +409,8 @@ Context cancellation drains the semaphore acquire and skips remaining work.
 - No goroutine leak from a background cleanup loop.
 - A small number of stale entries can accumulate if a hotel's rate is never re-queried. This is acceptable because the cache is keyed on `(prefix, apiHotelID)` and the entry count is bounded by the number of active hotels.
 
+The cache is keyed on `(prefix, apiHotelID, checkIn, checkOut)` — stay dates are included so different date ranges do not share a slot. Date normalisation (empty → today/tomorrow) runs before the cache lookup, so an omitted date and the same explicit date string produce the same key.
+
 The cache stores `nil` for hotels where all rate sources failed. This prevents repeated API calls for hotels with no rate data.
 
 ---
@@ -538,7 +540,7 @@ In a Claude Desktop deployment, the server is launched on demand when the user o
 |---|----------|-----------|
 | 1 | Go + go-sdk for MCP | Type-safe, single binary, no Node.js runtime dependency |
 | 2 | Multi-DB Pool with lazy connect | Brands acquired independently; schema diversity; not all brands always reachable |
-| 3 | Rate fallback chain (SB → stored → starting_price) | Live rates preferred; graceful degradation to catalog prices |
+| 3 | Rate fallback chain (SB → Sentec → stored → starting_price) | Live rates from multiple booking engines; graceful degradation to catalog prices |
 | 4 | Gin for HTTP transport | Minimal, idiomatic Go HTTP; lightweight middleware (CORS, recovery, logging) |
 | 5 | MCP Apps ext-apps protocol for UI | Single session for both data and UI; no separate web server or auth |
 | 6 | resizeImageURL for CSP-safe thumbnails | No base64 bloat; no proxy endpoint; pure URL transformation |

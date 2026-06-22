@@ -19,6 +19,8 @@ set, using the defaults listed below.
 | `MYSQL_DB` | string | `db_archipelagowebsite` | Central database name. Overriding this is rare; only do it if the central catalog lives under a different schema name in your environment. |
 | `DEBUG` | string | `0` | Set to `1` to enable `slog.LevelDebug` output on stderr. Includes SQL query tracing, brand-DB connection events, and SimpleBooking request/response details. Any other value (including unset) leaves the log level at `Info`. |
 | `url_image_resizer` | string | `https://images.archipelagohotels.com/` | Base URL of the Archipelago image-resize proxy. Hotel thumbnail URLs from brand databases are rewritten through this proxy so that the MCP App UI can display them without violating the Claude Desktop Content Security Policy. Must end with a trailing slash. |
+| `SENTEC_USER` | string | `website@archipelagointernational.com` | Sentec API username. Override for credential rotation. Used when the hotel's brand DB has no `credential_booking_engines` row with `code='SENTEC'`. |
+| `SENTEC_PASS` | string | `NllhBd0GHC7V2w` | Sentec API password. Override for credential rotation. Used when the hotel's brand DB has no `credential_booking_engines` row with `code='SENTEC'`. |
 
 ### Notes
 

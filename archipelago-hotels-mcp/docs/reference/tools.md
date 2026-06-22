@@ -51,11 +51,12 @@ Public tools (`search_hotels`, `recommend_hotel`, `find_hotels`) do **not** incl
 
 ## Rate data sources
 
-`priceFrom` / `startingPrice` values in all responses are resolved through a three-level fallback chain. The `source` field on each room type in `get_hotel_detail` identifies which level was used:
+`priceFrom` / `startingPrice` values in all responses are resolved through a four-level fallback chain. The `source` field on each room type in `get_hotel_detail` identifies which level was used:
 
 | `source` value | Origin | Notes |
 |----------------|--------|-------|
 | `simplebooking` | SimpleBooking XML API (live) | `OTA_HotelAvailRQ`; 5-worker bounded pool; 5-min TTL cache; circuit breaker (5 failures → 120 s cooldown) |
+| `sentec` | Sentec REST API (live) | `hotel_channel = 'SENTEC'`; credentials from `credential_booking_engines` (brand DB) with `SENTEC_USER`/`SENTEC_PASS` env fallback |
 | `stored` | `tb_hrooms.room_rate` in per-brand DB | Fallback when SB credentials missing or API unavailable |
 | `starting_price` | `hotel_starting_price` in central DB | Last resort; single scalar, no room breakdown |
 
@@ -401,7 +402,9 @@ Returns full detail for a single hotel including all room types, amenities, loca
 {
   "type": "object",
   "properties": {
-    "hotelId": { "type": "string", "description": "The hotel ID (numeric string), e.g. \"1042\"." }
+    "hotelId":  { "type": "string", "description": "The hotel ID (numeric string), e.g. \"1042\"." },
+    "checkIn":  { "type": "string", "description": "Check-in date YYYY-MM-DD. Defaults to today." },
+    "checkOut": { "type": "string", "description": "Check-out date YYYY-MM-DD. Defaults to tomorrow." }
   },
   "required": ["hotelId"]
 }
@@ -410,6 +413,8 @@ Returns full detail for a single hotel including all room types, amenities, loca
 | Parameter | Type | Required | Notes |
 |-----------|------|----------|-------|
 | `hotelId` | string | **yes** | Numeric hotel ID as a string (parsed internally with `fmt.Sscanf`). Use the `id` field from any `HotelSummary`. |
+| `checkIn` | string | no | Check-in date `YYYY-MM-DD`. Defaults to today when omitted or empty. |
+| `checkOut` | string | no | Check-out date `YYYY-MM-DD`. Defaults to tomorrow when omitted or empty. |
 
 ### Response structure
 

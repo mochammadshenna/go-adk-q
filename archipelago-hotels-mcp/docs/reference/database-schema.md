@@ -73,8 +73,8 @@ Brand-specific hotel attributes. `hotel_id` here corresponds to `api_hotel_id` i
 | `simplebooking_pass` | VARCHAR NULL | XML agent password for SimpleBooking API. Optional. |
 | `xml_user` | VARCHAR NULL | Alternative XML credentials username. Optional. |
 | `xml_pass` | VARCHAR NULL | Alternative XML credentials password. Optional. |
-| `hotel_channel` | VARCHAR NULL | Booking engine identifier (e.g. `SB` for SimpleBooking). Optional. |
-| `sentec_booking_id` | VARCHAR NULL | Sentec PMS property ID for future Sentec rate integration. Optional. |
+| `hotel_channel` | VARCHAR NULL | Booking engine identifier (`SB` = SimpleBooking, `SENTEC` = Sentec Booking Engine). Optional. |
+| `sentec_booking_id` | VARCHAR NULL | Sentec Booking Engine property ID passed as `property_id` in availability search requests (`hotel_channel = 'SENTEC'`). Optional. |
 
 All credential columns are discovered at connection time via `INFORMATION_SCHEMA.COLUMNS` and accessed only if present. This makes the server forward-compatible when columns are added to brand schemas incrementally.
 
@@ -89,7 +89,7 @@ Room types for most brands. Filtered by `hotel_id = api_hotel_id` and `room_stat
 | `room_rate` | DECIMAL or INT NULL | Published nightly rate. Optional — some schemas omit it. Column type varies by brand (DECIMAL or INT); scan code handles both. |
 | `sb_id` | INT NULL | SimpleBooking room type ID. Optional. |
 | `room_status` | VARCHAR | `Y` = active. Default filter value. |
-| `sentec_id` | INT NULL | Sentec room type ID for future rate integration. Optional. |
+| `sentec_id` | INT NULL | Sentec room type ID; matched against `sentecRate.RoomID` when merging Sentec API results into room types. Optional. |
 
 ### `tb_hroom` (PBA brand only)
 
@@ -103,6 +103,22 @@ PBA uses a different table name and status column convention.
 | `sb_id` | INT NULL | Optional |
 | `status` | TINYINT | `1` = active (differs from `tb_hrooms.room_status = 'Y'`) |
 | `sentec_id` | INT NULL | Optional |
+
+### `credential_booking_engines` (select brand DBs)
+
+Stores booking engine API credentials keyed by `code`. Present in `db_astonwebsite`, `db_alanawebsite`, and `db_pba`; absent from other brand databases. The rate service queries this table for `code = 'SENTEC'` to obtain per-brand Sentec credentials before falling back to the `SENTEC_USER`/`SENTEC_PASS` environment variables.
+
+| Column | Type | Notes |
+|---|---|---|
+| `credential_id` | INT PK | |
+| `code` | VARCHAR | Booking engine identifier, e.g. `SENTEC` |
+| `username` | VARCHAR | API username |
+| `password` | VARCHAR | API password |
+| `status` | TINYINT | `1` = active. Only rows with `status = 1` are used. |
+
+Query: `SELECT username, password FROM credential_booking_engines WHERE code = 'SENTEC' AND status = 1 LIMIT 1`
+
+If the table does not exist (MySQL error 1146) or has no active SENTEC row, the call returns empty strings and the caller falls back to environment variables.
 
 ---
 
@@ -211,5 +227,5 @@ erDiagram
 | `api_hotel_id` (central) | `db_archipelagowebsite.tb_hotels.api_hotel_id` | Foreign key into brand DB `tb_hotels.hotel_id`. The bridge between central and per-brand data. |
 | `simplebooking_id` (brand) | brand `tb_hotels.simplebooking_id` | Hotel code for SimpleBooking OTA availability API (`<Filter HotelCode="..."/>`). |
 | `sb_id` (brand rooms) | brand `tb_hrooms.sb_id` | Room type code for SimpleBooking. |
-| `sentec_id` (brand rooms) | brand `tb_hrooms.sentec_id` | Room type code for Sentec PMS (future use). |
-| `sentec_booking_id` (brand) | brand `tb_hotels.sentec_booking_id` | Property ID for Sentec Booking Engine (future use). |
+| `sentec_id` (brand rooms) | brand `tb_hrooms.sentec_id` | Room type code for Sentec Booking Engine; matched against `sentecRate.RoomID` when merging Sentec API results into room types. |
+| `sentec_booking_id` (brand) | brand `tb_hotels.sentec_booking_id` | Property ID passed as `property_id` in Sentec availability search requests. |

@@ -22,17 +22,18 @@ SimpleBooking is occasionally unreachable due to maintenance windows or transien
 
 ## Decision
 
-Implement a **three-tier price fallback chain** evaluated in order of data freshness. A cache layer and a circuit breaker protect against redundant and runaway calls to the live API tier.
+Implement a **four-tier price fallback chain** evaluated in order of data freshness. A cache layer and a circuit breaker protect against redundant and runaway calls to the live API tiers.
 
 ### Tier overview
 
 | Tier | Source | Freshness | Coverage | Query complexity |
 |------|--------|-----------|----------|-----------------|
 | 1 | SimpleBooking XML API (live) | Real-time (cached 5 min) | Hotels with `api_hotel_id` mapped to SimpleBooking | HTTP + XML parse |
-| 2 | `tb_hrooms.room_rate` in brand DB | Periodic ETL (hours to days) | Hotels with brand DB connectivity | SQL — brand DB |
-| 3 | `hotel_starting_price` in central DB | Manual / infrequent | All hotels in catalog | Already fetched at search time |
+| 2 | Sentec REST API (live) | Real-time (cached 5 min) | Hotels with `hotel_channel = 'SENTEC'` and `sentec_booking_id` | HTTP + JSON parse |
+| 3 | `tb_hrooms.room_rate` in brand DB | Periodic ETL (hours to days) | Hotels with brand DB connectivity | SQL — brand DB |
+| 4 | `hotel_starting_price` in central DB | Manual / infrequent | All hotels in catalog | Already fetched at search time |
 
-Tier 3 data is already present on the hotel record returned by the search query, so it has zero additional query cost when reached as a fallback.
+Tier 4 data is already present on the hotel record returned by the search query, so it has zero additional query cost when reached as a fallback.
 
 ---
 

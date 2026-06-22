@@ -1,9 +1,7 @@
 // Package rate — room rate orchestration with multi-source fallback.
 //
-// Fallback chain: SimpleBooking live API → stored tb_hrooms.room_rate
-//   → hotel_starting_price from central DB.
-//
-// Senetc REST API is reserved for future use (zero hotels currently use it).
+// Fallback chain: SimpleBooking live API → Sentec REST API
+//   → stored tb_hrooms.room_rate → hotel_starting_price from central DB.
 package rate
 
 import (
