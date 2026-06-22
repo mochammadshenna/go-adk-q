@@ -1,0 +1,660 @@
+# archipelago-hotels-mcp — Full LLM Reference
+
+> llms-full.txt per https://llmstxt.org/
+> Generated: 2026-06-22
+> Version: Go 1.25 / go-sdk v1.6.1
+
+---
+
+## 1. Project Overview
+
+`archipelago-hotels-mcp` is a Go MCP (Model Context Protocol) server — a Sentec Tech product — that gives AI assistants structured access to Archipelago Hotels & Resorts inventory. It exposes 279+ properties across 13 brands in Indonesia and Southeast Asia.
+
+**Module**: `github.com/msw/archipelago-hotels-mcp`
+
+Supports two MCP transports:
+- **stdio** — Claude Desktop, Pi Agent, any MCP host that spawns a child process
+- **Streamable HTTP** — Gin HTTP server on `:9011`; accessible to web-based MCP clients
+
+Four MCP tools expose hotel search, recommendation, browsing, and full detail. An interactive hotel dashboard UI is embedded as an MCP App resource (`ui://hotel-dashboard`) and rendered inside Claude Desktop without leaving the conversation.
+
+Pricing uses a three-tier fallback chain: SimpleBooking XML API (live) → per-brand stored room rates → central starting price.
+
+Hotel catalog lives in a central MySQL database (`db_archipelagowebsite`) plus 8 per-brand databases that are lazily connected on first use.
+
+---
+
+## 2. Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────┐
+│  MCP Client (Claude Desktop / HTTP client)          │
+└──────────────┬──────────────────────────────────────┘
+               │  stdio  OR  Streamable HTTP (:9011)
+┌──────────────▼──────────────────────────────────────┐
+│  cmd/archipelago-hotels-mcp/main.go                 │
+│  Transport dispatch: stdio | http                   │
+└──────────────┬──────────────────────────────────────┘
+               │
+┌──────────────▼──────────────────────────────────────┐
+│  internal/server/server.go                          │
+│  MCP server wiring + Gin HTTP routes                │
+│  Tools registered: search, recommend, find, detail  │
+│  Resource registered: ui://hotel-dashboard          │
+└──┬──────────────────────────────────────────────────┘
+   │
+   ├── internal/tools/        (MCP tool handlers)
+   │     search.go            search_hotels
+   │     recommend.go         recommend_hotel
+   │     dashboard.go         find_hotels
+   │     detail.go            get_hotel_detail (app-only)
+   │
+   ├── internal/repository/   (MySQL data access)
+   │     repository.go        Pool, Config, HotelRow, BrandRow, RoomRow
+   │     hotel.go             SearchHotels, GetHotelByID, GetThumbnails, resizeImageURL
+   │     room.go              GetRooms (schema-adaptive), GetCredentials
+   │
+   ├── internal/rate/         (Pricing orchestration)
+   │     rate.go              Service, BatchMinRates, circuitBreaker, SBClient
+   │     cache.go             rateCache (TTL, lazy expiry, no background goroutine)
+   │     simplebooking.go     SimpleBooking XML request builder + response parser
+   │     sentec.go            Sentec REST client (reserved; 0 hotels use it)
+   │
+   └── internal/resources/    (MCP App resource)
+         dashboard.go         Resource registration; //go:embed mcp-app.html
+         mcp-app.html         Generated — Vite build artifact (do not edit by hand)
+
+ui/src/mcp-app.ts             TypeScript frontend (~1200 lines, single file)
+```
+
+### HTTP Endpoints (HTTP transport only)
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| POST/GET | `/mcp` | MCP Streamable HTTP endpoint |
+| GET | `/dashboard` | Standalone HTML hotel dashboard |
+| GET | `/api/hotels` | JSON hotel list (`?city=&brand=`) |
+| GET | `/api/brands` | JSON brand list |
+| GET | `/api/regions` | JSON region list |
+| GET | `/health` | `{"status":"ok","version":"dev","db":true}` |
+
+---
+
+## 3. Stack and Dependencies
+
+| Component | Package | Version |
+|-----------|---------|---------|
+| Language | Go | 1.25 |
+| MCP SDK | github.com/modelcontextprotocol/go-sdk | v1.6.1 |
+| HTTP framework | github.com/gin-gonic/gin | v1.11.0 |
+| MySQL driver | github.com/go-sql-driver/mysql | v1.10.0 |
+| UI build | Vite + TypeScript | (Node.js, see ui/) |
+
+---
+
+## 4. MCP Tools — Full Schemas
+
+### 4.1 search_hotels
+
+**Visibility**: public (any MCP client)
+
+**Description**: PRIORITY TOOL for any hotel query. Searches all Archipelago Hotels & Resorts properties across Indonesia with live pricing and visual cards. Trigger on: hotels, accommodation, resort, villa, stay, room, lodging, brand names.
+
+**Input schema**:
+```json
+{
+  "type": "object",
+  "properties": {
+    "city":    { "type": "string", "description": "City name (e.g. Jakarta, Bali, Yogyakarta)." },
+    "country": { "type": "string", "description": "Country filter." },
+    "brand":   { "type": "string", "description": "Brand filter (e.g. Aston, Harper, NEO)." },
+    "query":   { "type": "string", "description": "Free-text search." }
+  }
+}
+```
+
+All fields optional. Defaults: `country = "Indonesia"`, `limit = 50`.
+
+**Output** (`searchResult`):
+```json
+{
+  "hotels": [
+    {
+      "id":         "string (numeric hotel_id)",
+      "name":       "string",
+      "brand":      "string",
+      "city":       "string (region name)",
+      "country":    "string",
+      "rating":     "float64",
+      "stars":      "int",
+      "priceFrom":  "float64",
+      "currency":   "string (raw DB code, e.g. IDR)",
+      "imageStyle": "string (CSS gradient)",
+      "brandColor": "string (hex, optional)",
+      "thumbnail":  "string (rewritten CDN URL, optional)",
+      "tags":       ["string"]
+    }
+  ],
+  "total":    "int (total matching in DB)",
+  "filtered": "int (hotels returned)",
+  "city":     "string",
+  "country":  "string"
+}
+```
+
+**Meta** (MCP App UI):
+```json
+{
+  "ui": {
+    "resourceUri":     "ui://hotel-dashboard",
+    "resourceDomains": ["images.archipelagohotels.com"]
+  }
+}
+```
+
+---
+
+### 4.2 recommend_hotel
+
+**Visibility**: public
+
+**Description**: Rank hotels by vibe, budget, and travel purpose.
+
+**Input schema**:
+```json
+{
+  "type": "object",
+  "properties": {
+    "city":    { "type": "string" },
+    "budget":  { "type": "number", "description": "Max price per night." },
+    "purpose": { "type": "string", "description": "e.g. business, leisure, honeymoon, family." },
+    "vibe":    { "type": "string", "description": "e.g. luxury, budget, boutique, beach." },
+    "brand":   { "type": "string" }
+  }
+}
+```
+
+**Output**: Same `hotelSummary` array structure as `search_hotels`, ranked by relevance score.
+
+**Meta**: Same `ui` block with `resourceUri` and `resourceDomains`.
+
+---
+
+### 4.3 find_hotels
+
+**Visibility**: public
+
+**Description**: Browse and book all hotels with optional city/brand filter. Opens the interactive hotel dashboard UI.
+
+**Input schema**:
+```json
+{
+  "type": "object",
+  "properties": {
+    "city":  { "type": "string" },
+    "brand": { "type": "string" }
+  }
+}
+```
+
+**Output**: Same `hotelSummary` array.
+
+**Meta**: Same `ui` block with `resourceUri` and `resourceDomains`.
+
+---
+
+### 4.4 get_hotel_detail
+
+**Visibility**: `app` only — hidden from Claude's tool list; called exclusively by the embedded UI (`mcp-app.ts`). Never promote to public.
+
+**Description**: Full hotel detail including all room types, amenities, pricing, and location.
+
+**Input schema**:
+```json
+{
+  "type": "object",
+  "properties": {
+    "hotelId": { "type": "string", "description": "Numeric hotel ID as string." }
+  },
+  "required": ["hotelId"]
+}
+```
+
+**Output** (map):
+```json
+{
+  "id":           "string",
+  "name":         "string",
+  "brand":        "string",
+  "city":         "string",
+  "country":      "string",
+  "address":      "string",
+  "rating":       "float64",
+  "stars":        "int",
+  "latitude":     "float64",
+  "longitude":    "float64",
+  "currency":     "string",
+  "imageStyle":   "string",
+  "brandColor":   "string",
+  "thumbnail":    "string",
+  "startingPrice":"float64 (omitted if 0)",
+  "roomTypes": [
+    {
+      "name":          "string",
+      "pricePerNight": "float64",
+      "baseRate":      "float64",
+      "currency":      "string",
+      "maxGuests":     "int (2)",
+      "rateSource":    "string (simplebooking|stored|starting_price)"
+    }
+  ]
+}
+```
+
+**Meta**:
+```json
+{
+  "ui": {
+    "resourceUri": "ui://hotel-dashboard",
+    "visibility":  ["app"]
+  }
+}
+```
+
+---
+
+## 5. Environment Variables
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `MYSQL_HOST` | `127.0.0.1` | Central DB host |
+| `MYSQL_PORT` | `3306` | Central DB port |
+| `MYSQL_USER` | `root` | MySQL username |
+| `MYSQL_PASS` | *(empty)* | MySQL password |
+| `MYSQL_DB` | `db_archipelagowebsite` | Central database name |
+| `DEBUG` | `0` | Set to `1` for verbose slog output |
+| `url_image_resizer` | `https://images.archipelagohotels.com/` | Image CDN proxy base URL |
+
+Per-brand DB naming convention: `db_{prefix}website` (e.g. `db_astonwebsite`).
+Exceptions in `repository.brandDBName`: `favehotel → db_favewebsite`, `pba → db_pba`.
+
+SimpleBooking credentials are stored per-hotel in the per-brand databases and fetched at runtime by `repository.GetCredentials`.
+
+---
+
+## 6. Database Schema Overview
+
+### Central DB: `db_archipelagowebsite`
+
+Primary catalog tables (all partitioned by `hotel_id` — always include explicit filters):
+
+| Table | Key Columns |
+|-------|-------------|
+| `hotel_global` | `hotel_id`, `hotel_name`, `hotel_address`, `hotel_star`, `hotel_rating`, `hotel_starting_price`, `hotel_currency`, `api_hotel_id`, `db_prefix` |
+| `hotel_region` / `region` | `region_id`, `region_name` (city) |
+| `hotel_brand` / `brand` | `brand_id`, `brand_name` |
+| `hotel_image` | `hotel_id`, `image_url`, `is_primary` |
+
+### Per-Brand DBs: `db_{prefix}website`
+
+| Table | Key Columns | Notes |
+|-------|-------------|-------|
+| `tb_hrooms` | `hotel_id`, `room_name`, `room_rate`, `room_status` | Most brands |
+| `tb_hroom` | `hotel_id`, `room_name`, `room_rate`, `hroom_status` | PBA only |
+| `tb_simplebooking_credential` | `hotel_id`, `sb_username`, `sb_password`, `sb_hotel_id` | SB API credentials |
+
+**Schema-adaptive access**: On connect, `Pool` runs `INFORMATION_SCHEMA` introspection and caches which columns exist per brand per table. Use `Pool.HasColumn(prefix, table, column)` before referencing optional columns. Do not assume uniform schema across brands.
+
+**Partition filter rule**: The central database tables are partitioned by `hotel_id`. Any query omitting an explicit `hotel_id` or `region_id` filter performs a full partition scan. Always include explicit filters.
+
+---
+
+## 7. Key Code Patterns
+
+### 7.1 Pool — Multi-DB Lazy Connect
+
+```go
+// repository.go
+type Pool struct {
+    central  *sql.DB
+    brandDBs map[string]*sql.DB   // prefix → connection (nil = offline)
+    columns  map[string]columnSet // "prefix.table" → set of column names
+    mu       sync.RWMutex
+}
+
+// BrandDB returns the DB for the given prefix, lazy-connecting if needed.
+// Returns nil (non-fatal) if the brand DB is unreachable.
+func (p *Pool) BrandDB(prefix string) *sql.DB
+
+// HasColumn returns true if the brand DB table has the named column.
+func (p *Pool) HasColumn(prefix, table, column string) bool
+```
+
+- `Pool.central` connects at startup.
+- `Pool.BrandDB(prefix)` lazy-connects on first call; nil return is non-fatal.
+- Always nil-check a brand DB before querying. Fall back to `HotelRow.StartingPrice` on nil.
+- PBA exception: table name is `tb_hroom` (singular), status column is `hroom_status`.
+
+### 7.2 Rate Fallback Chain
+
+Priority order — do not reorder:
+
+1. **SimpleBooking XML API** (live) — `internal/rate/simplebooking.go`
+   - `OTA_HotelAvailRQ` XML POST to SB endpoint
+   - 5-worker bounded goroutine pool per `BatchMinRates` call
+   - 5-minute TTL in-memory cache (`internal/rate/cache.go`)
+   - Circuit breaker: 5 consecutive failures → 120-second cooldown
+
+2. **`tb_hrooms.room_rate`** (stored) — per-brand DB
+   - Read by `internal/repository/room.go`
+   - Schema-adaptive: checks `HasColumn` before reading `room_rate`
+
+3. **`hotel_starting_price`** (central DB, last resort)
+   - `HotelRow.StartingPrice` populated at catalog fetch time
+
+All rate resolution must go through `internal/rate.Service`. Tool handlers must never call the SB API directly.
+
+### 7.3 Circuit Breaker
+
+```go
+type circuitBreaker struct {
+    failures  int
+    lastFail  time.Time
+    threshold int           // 5
+    cooldown  time.Duration // 120s
+}
+
+func (cb *circuitBreaker) isOpen() bool {
+    if cb.failures < cb.threshold {
+        return false
+    }
+    return time.Since(cb.lastFail) < cb.cooldown
+}
+```
+
+### 7.4 Handler Function Pattern
+
+Every MCP tool handler follows this closure pattern:
+
+```go
+func myHandler(pool *repository.Pool, rateSvc *rate.Service) func(
+    context.Context, *mcp.CallToolRequest, MyArgs,
+) (*mcp.CallToolResult, MyResult, error) {
+    return func(ctx context.Context, _ *mcp.CallToolRequest, args MyArgs) (
+        res *mcp.CallToolResult, out MyResult, err error,
+    ) {
+        defer func() {
+            if r := recover(); r != nil {
+                slog.Error("handler panic", "recover", r)
+                err = fmt.Errorf("internal error: %v", r)
+            }
+        }()
+        // normal logic
+        return nil, out, nil
+    }
+}
+```
+
+- `(nil, result, nil)` = success
+- `(nil, zeroValue, err)` = tool error
+- All panics are caught by `defer recover()` and converted to errors.
+- `ctx` from the handler flows to every DB and HTTP call; never use `context.Background()` inside a handler.
+
+### 7.5 Image URL Rewriting
+
+`resizeImageURL(rawURL, baseURL string) string` rewrites hotel CDN URLs to route through `images.archipelagohotels.com`. This is required for MCP App sandbox CSP compliance. Never fetch image bytes server-side or base64-proxy them — this would exceed MCP response size limits.
+
+The UI loads thumbnails via `<img src>` only; it never uses `fetch()` for images.
+
+---
+
+## 8. MCP App UI Protocol
+
+- **Resource URI**: `ui://hotel-dashboard`
+- **MIME type**: `text/html;profile=mcp-app`
+- **Registration**: `internal/resources/dashboard.go` using `//go:embed mcp-app.html`
+- **Source**: `ui/src/mcp-app.ts` (TypeScript, ~1200 lines, single file)
+- **Build output**: `ui/dist/index.html` (self-contained: all JS/CSS inlined by Vite) → copied to `internal/resources/mcp-app.html`
+
+### UI Contracts
+
+- `hotelSummary` JSON fields are read by name. Renaming or removing any field in Go breaks the UI silently.
+- All CSS and JS must be inlined by Vite. No CDN imports — the MCP App sandbox blocks external scripts.
+- `fmtPrice(amount, currencyCode)` receives the raw DB currency code (e.g. `IDR`). Uses `toLocaleString('id-ID')` for IDR display. Do not hardcode currency symbols.
+- `resizeImageURL()` produces `images.archipelagohotels.com` URLs. The UI loads them as `<img src>`.
+
+### resourceDomains Per Tool Call
+
+Every tool that opens the hotel dashboard must declare:
+```go
+"resourceDomains": []string{"images.archipelagohotels.com"}
+```
+in its `mcp.Meta["ui"]` map. The MCP App sandbox re-evaluates domain permissions per tool call; the resource registration alone is insufficient.
+
+---
+
+## 9. Build Process
+
+```
+# Full rebuild (UI + Go binary) — use after any change
+make build
+
+# UI-only rebuild
+make build-ui         # npm install + vite build → internal/resources/mcp-app.html
+
+# Go-only rebuild (UI must already be built)
+make build-go         # → bin/archipelago-hotels-mcp
+make build-fast       # alias for build-go
+
+# Development
+make dev-http         # build-fast + run HTTP mode with DEBUG=1 on :9011
+make run-stdio        # build-fast + run stdio transport
+
+# Other
+make lint             # go vet ./...
+make install          # go install ./cmd/archipelago-hotels-mcp
+make clean            # remove bin/, ui/dist/, ui/node_modules/, Go cache
+```
+
+**UI embed pipeline**:
+```
+ui/src/mcp-app.ts
+    → vite build (npm run build)
+ui/dist/index.html          (all JS/CSS inlined)
+    → cp (Makefile)
+internal/resources/mcp-app.html
+    → //go:embed (resources/dashboard.go)
+bin/archipelago-hotels-mcp  (HTML embedded at compile time)
+```
+
+`internal/resources/mcp-app.html` must exist before `go build`. Never delete it without running `make build-ui` first. Running `make build-fast` after a UI edit silently ships stale UI. Always run `make build` after any UI change.
+
+---
+
+## 10. Brands
+
+| Brand | DB Prefix | Notes |
+|-------|-----------|-------|
+| Aston | `aston` | |
+| Grand Aston | `aston` | shares Aston DB |
+| The Alana | `alana` | |
+| Harper | `harper` | |
+| Hotel NEO | `neo` | |
+| favehotels | `favehotel` | DB: `db_favewebsite` |
+| Kamuela Villas | `kamuela` | |
+| Quest | `quest` | |
+| Huxley | `huxley` | |
+| Nordic | `nordic` | |
+| Four Corners | `fourcorners` | |
+| PBA (Powered By Archi) | `pba` | DB: `db_pba`; table: `tb_hroom` (singular); status col: `hroom_status` |
+
+Brand gradient styles and `imageStyle` CSS values are defined in `internal/repository/repository.go`.
+
+---
+
+## 11. Architecture Decision Records (ADR Summary)
+
+| # | Decision | Rationale |
+|---|----------|-----------|
+| ADR-0001 | Use Go + go-sdk for MCP (not Node.js) | Go compiles to a single static binary with no runtime dependency; better fit for Claude Desktop stdio child process; go-sdk is the canonical Go MCP implementation. |
+| ADR-0002 | Multi-DB Pool with lazy connect | Brand DBs are optional and may be offline; lazy connect avoids startup failures; nil-safe design allows degraded mode without panicking. |
+| ADR-0003 | Rate fallback chain (SB → stored → starting_price) | Live SB rates are most accurate but require API credentials and may fail; stored rates are always available offline; starting_price is the final safety net. |
+| ADR-0004 | Gin for HTTP transport | go-sdk HTTP transport integrates cleanly with Gin middleware; Gin provides CORS, routing, and context management with minimal boilerplate. |
+| ADR-0005 | MCP Apps ext-apps protocol for UI | Embeds the interactive hotel dashboard inside Claude Desktop without a separate browser window; resource registered as `ui://hotel-dashboard` with `text/html;profile=mcp-app` MIME type. |
+| ADR-0006 | resizeImageURL for CSP-safe thumbnails | MCP App sandbox enforces strict CSP; all image domains must be declared in `resourceDomains`; rewriting CDN URLs to a single declared domain avoids per-URL CSP exceptions and eliminates server-side image proxying. |
+| ADR-0007 | Raw hotel_currency code (not hardcoded symbol map) | Properties may have different currencies; passing the raw DB code through to the UI and formatting via `toLocaleString` is correct and future-proof. |
+
+Full ADR text is in `docs/adr/`.
+
+---
+
+## 12. Known Pitfalls
+
+1. **PBA table name**: `tb_hroom` (singular), not `tb_hrooms`. Using the wrong table name returns zero rows with no error.
+
+2. **Stale embedded UI**: Running `make build-fast` or `make build-go` after editing `ui/src/mcp-app.ts` embeds the old HTML. Always run `make build` after UI changes.
+
+3. **Missing resourceDomains in tool Meta**: The MCP App sandbox evaluates `resourceDomains` per tool call. Omitting it from a tool's `Meta["ui"]` map means hotel thumbnails will fail to load even though the resource is registered correctly.
+
+4. **Central DB partition scan**: Omitting `hotel_id` or `region_id` filters on central catalog tables causes full partition scans. Always filter explicitly.
+
+5. **Nil brand DB**: `Pool.BrandDB(prefix)` returns nil for offline/missing brand DBs. Nil-check before any brand DB query; do not let nil propagate to `sql.DB` method calls.
+
+6. **Currency symbol hardcoding**: Several older handlers incorrectly hardcode `"Indonesia"` as country or `"IDR"` as currency. New code must derive these values from the hotel record.
+
+7. **context.Background() in handlers**: Tool handler `ctx` carries request-scoped cancellation. Using `context.Background()` inside a handler creates unbound DB/HTTP calls that outlive the MCP request.
+
+8. **`get_hotel_detail` visibility**: This tool is gated to `visibility: ["app"]`. Promoting it to public exposes internal hotel IDs and room-rate credentials to arbitrary MCP clients.
+
+9. **Direct SB API calls from tool handlers**: All SB API calls must go through `internal/rate.Service`. Direct calls from tool handlers bypass the cache and circuit breaker.
+
+10. **Editing mcp-app.html by hand**: It is a Vite build artifact. Any manual edit is overwritten by the next `make build-ui`.
+
+---
+
+## 13. Package Responsibilities
+
+| Package | Role | Must NOT contain |
+|---------|------|-----------------|
+| `internal/repository/` | SQL queries, row mapping, image URL rewriting | MCP SDK calls, rate service calls |
+| `internal/tools/` | MCP tool handlers: parse args, call repo + rate, return MCP content | Raw SQL or direct DB access |
+| `internal/rate/` | Pricing: SB API, cache, circuit breaker, fallback chain | Hotel metadata queries |
+| `internal/resources/` | Register MCP resources (UI embed) | Business logic |
+| `internal/server/` | Wire tools + resources onto `mcp.Server`; own Gin routes | Tool business logic |
+
+---
+
+## 14. Verification Checklist
+
+Minimum before committing:
+
+```bash
+# Lint
+make lint               # go vet ./...
+
+# Compilation check
+go build ./...
+
+# Full build
+make build
+
+# Health check (HTTP mode)
+make dev-http &
+curl http://localhost:9011/health
+# Expected: {"db":true,"status":"ok","version":"dev"}
+
+# Tool list smoke test
+curl -s -X POST http://localhost:9011/mcp \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' \
+  | jq '.result.tools[].name'
+# Expected: ["search_hotels","get_hotel_detail","recommend_hotel","find_hotels"]
+
+# Degraded mode (no DB) — must start without panic
+MYSQL_PASS=wrong ./bin/archipelago-hotels-mcp stdio
+```
+
+---
+
+## 15. File Structure
+
+```
+archipelago-hotels-mcp/
+├── cmd/
+│   └── archipelago-hotels-mcp/
+│       └── main.go               Entrypoint; transport dispatch (stdio|http)
+├── internal/
+│   ├── rate/
+│   │   ├── cache.go              TTL rate cache (lazy expiry, no background goroutine)
+│   │   ├── rate.go               Service, BatchMinRates, circuitBreaker, SBClient
+│   │   ├── sentec.go             Sentec REST client (reserved; unused)
+│   │   └── simplebooking.go      XML request builder + response parser
+│   ├── repository/
+│   │   ├── hotel.go              SearchHotels, GetHotelByID, GetThumbnails, resizeImageURL
+│   │   ├── repository.go         Pool, Config, HotelRow, BrandRow, RoomRow
+│   │   └── room.go               GetRooms (schema-adaptive), GetCredentials
+│   ├── resources/
+│   │   ├── dashboard.go          MCP resource registration; //go:embed mcp-app.html
+│   │   └── mcp-app.html          GENERATED — Vite build artifact (do not edit)
+│   ├── server/
+│   │   └── server.go             MCP server wiring + Gin HTTP routes
+│   └── tools/
+│       ├── dashboard.go          find_hotels handler
+│       ├── detail.go             get_hotel_detail handler (app-only)
+│       ├── recommend.go          recommend_hotel handler
+│       ├── search.go             search_hotels handler; hotelSummary type
+│       └── tools.go              Shared tool utilities
+├── ui/
+│   ├── src/
+│   │   └── mcp-app.ts            TypeScript frontend (~1200 lines, single file)
+│   ├── dist/
+│   │   └── index.html            Vite build output (copied to internal/resources/)
+│   └── index.html                Vite entry HTML
+├── docs/
+│   ├── adr/                      Architecture Decision Records (ADR-0001 to ADR-0007)
+│   ├── explanation/              Conceptual background (architecture, data model, UI protocol)
+│   ├── how-to/                   Task-oriented guides (build, deploy, add brand, etc.)
+│   ├── reference/                API, CLI, env, tool reference
+│   └── tutorials/                Step-by-step walkthroughs
+├── bin/
+│   └── archipelago-hotels-mcp    Compiled binary (gitignored)
+├── AGENTS.md                     AI agent guide (read before any code change)
+├── DESIGN.md                     Design decisions and ADR history
+├── go.mod                        Go module (github.com/msw/archipelago-hotels-mcp)
+├── go.sum
+├── Makefile                      Build, lint, run, clean targets
+└── llms-full.txt                 This file
+```
+
+---
+
+## 16. Agent Instructions Summary
+
+(From AGENTS.md — authoritative source)
+
+**Before editing any Go file**:
+1. State which other files import the file you are about to modify.
+2. State which functions you are changing and what calls them.
+3. Quote the user's instruction verbatim.
+
+**Always Read before Edit/Write.** Never edit blind.
+
+**Code style**:
+- Idiomatic Go; `gofmt`-formatted.
+- No global state. All dependencies injected at registration time.
+- Write function bodies first, add imports after — no speculative imports.
+- Errors returned, not panicked. Every handler has `defer recover()`.
+- `log/slog` everywhere. No `fmt.Println` or `log.Printf` in handlers.
+- `ctx` from tool handler flows to every DB and HTTP call.
+- No TODO comments for incomplete functionality in `internal/` packages. Use `// ponytail:` for intentional deferrals.
+
+**Hard rules**:
+- Do not hardcode currency symbols. Pass `hotel_currency` from DB to UI.
+- Do not make HTTP requests to DB-sourced image URLs server-side.
+- Do not add imports before writing functions.
+- Do not assume brand DB schema; use `Pool.HasColumn`.
+- Do not bypass the rate fallback chain.
+- Do not promote `get_hotel_detail` to public visibility.
+- Do not edit `internal/resources/mcp-app.html` by hand.
+- Do not remove `resourceUri` from the three public tool Meta maps.
+- Do not hardcode `"Indonesia"` as country in new code.

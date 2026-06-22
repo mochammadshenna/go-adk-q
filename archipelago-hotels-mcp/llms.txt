@@ -1,0 +1,31 @@
+# archipelago-hotels-mcp
+
+> Go MCP server for searching and recommending Archipelago Hotels & Resorts properties across Indonesia and Southeast Asia.
+
+A Sentec Tech product that exposes four MCP tools backed by a central MySQL catalog and eight per-brand databases, fetches live room rates from the SimpleBooking XML API with a stored-rate fallback, and renders an interactive hotel dashboard as an embedded MCP App resource. Supports 279+ hotels across 13 brands via stdio (Claude Desktop) and Streamable HTTP on :9011.
+
+## Key Facts
+
+- Transport: stdio (Claude Desktop, Pi Agent) | Streamable HTTP :9011
+- Tools: search_hotels, recommend_hotel, find_hotels, get_hotel_detail (app-only)
+- Database: MySQL — central db_archipelagowebsite + 8 lazy-connect per-brand DBs
+- UI: MCP Apps embedded Vite+TypeScript hotel dashboard (ui://hotel-dashboard)
+- Rate sources: SimpleBooking XML API (live, circuit breaker, 5-min cache) → stored tb_hrooms.room_rate → hotel_starting_price
+- Brands: Aston, Grand Aston, The Alana, Harper, Hotel NEO, favehotels, Kamuela, Quest, Huxley, Nordic, Four Corners, PBA
+- Language: Go 1.25, github.com/modelcontextprotocol/go-sdk v1.6.1, Gin v1.11.0
+
+## Docs
+
+- [Architecture](docs/explanation/architecture.md)
+- [Rate Fallback Logic](docs/explanation/rate-fallback.md)
+- [Tools Reference](docs/reference/tools-api.md)
+- [Environment Variables](docs/reference/env-vars.md)
+- [Data Models](docs/reference/data-models.md)
+- [Build and Run](docs/how-to/build-and-run.md)
+- [Connect Claude Desktop](docs/how-to/connect-claude-desktop.md)
+- [ADR Index](docs/adr/)
+- [Tutorials](docs/tutorials/)
+
+## Optional
+
+- [Full Reference](docs/llms-full.txt)

@@ -21,6 +21,7 @@ for Go. Every core ADK pattern in one codebase.
 | Project | Description | Tools |
 |---------|-------------|-------|
 | [`dino-mcp/`](dino-mcp/) | Go MCP server with interactive HTML dashboard | `dino_think`, `dino_ask`, `dino_dashboard` |
+| [`archipelago-hotels-mcp/`](archipelago-hotels-mcp/) | Hotel search & recommendation MCP server — 13 brands, 39 properties, room rate cards | `search_hotels`, `get_hotel_detail`, `recommend_hotel`, `hotel_dashboard` |
 
 Built with Gin, ext-apps SDK, and the MCP Go SDK. All 13 docs indexed in context-mode:
 

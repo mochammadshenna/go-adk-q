@@ -1,0 +1,29 @@
+# archipelago-hotels-mcp
+
+A Go MCP (Model Context Protocol) server that gives Claude Desktop and compatible agents the ability to search, recommend, and visually display hotels from Archipelago Hotels & Resorts across Indonesia and Southeast Asia. It exposes four MCP tools backed by a central MySQL catalog and per-brand databases, fetches live room rates from the SimpleBooking XML API, and renders an interactive hotel dashboard as an embedded MCP App resource.
+
+Supported brands: Aston, Grand Aston, The Alana, Harper, Hotel NEO, favehotels, Kamuela, Quest, Huxley, Nordic, Four Corners, PBA.
+
+Transports: stdio (Claude Desktop, Pi Agent) and Streamable HTTP on :9011.
+
+## Links
+
+- [Reference — Tools API](reference/tools-api.md)
+- [Reference — Environment Variables](reference/env-vars.md)
+- [Reference — Data Models](reference/data-models.md)
+- [How-To — Build and Run](how-to/build-and-run.md)
+- [How-To — Connect Claude Desktop](how-to/connect-claude-desktop.md)
+- [Explanation — Architecture](explanation/architecture.md)
+- [Explanation — Rate Fallback Logic](explanation/rate-fallback.md)
+- [ADR — Database Strategy](adr/)
+- [Tutorials](tutorials/)
+
+## Codebase
+
+- `cmd/archipelago-hotels-mcp/` — Entry point. Parses `stdio`/`http` subcommands, wires DB pool and rate service.
+- `internal/server/` — MCP server construction, tool registration, Gin HTTP handler with CORS, `/dashboard`, `/api/hotels`, `/api/brands`, `/api/regions`, `/health` endpoints.
+- `internal/tools/` — Four MCP tool handlers: `search.go`, `recommend.go`, `detail.go`, `dashboard.go`.
+- `internal/repository/` — MySQL data access layer. `repository.go` manages the `Pool` (central + lazy per-brand connections). `hotel.go` implements `SearchHotels`, `GetHotelByID`, `GetThumbnails`, `resizeImageURL`. `room.go` fetches room rows from brand DBs.
+- `internal/rate/` — Rate orchestration. `rate.go` implements `Service.GetRates` with SimpleBooking → stored → starting_price fallback chain and a 5-minute in-memory cache. `simplebooking.go` posts to the SimpleBooking XML API. `cache.go` is the TTL cache. `sentec.go` is reserved for the Sentec REST API (not yet in use).
+- `internal/resources/` — `dashboard.go` registers the MCP App resource URI. `mcp-app.html` is the embedded Vite-built interactive UI.
+- `ui/` — Vite + TypeScript source for the MCP App dashboard. Built with `make build-ui`, output copied to `internal/resources/mcp-app.html`.

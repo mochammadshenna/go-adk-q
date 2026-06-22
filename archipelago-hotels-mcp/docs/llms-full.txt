@@ -1,0 +1,418 @@
+# archipelago-hotels-mcp
+
+A Go MCP (Model Context Protocol) server that gives Claude Desktop and compatible agents the ability to search, recommend, and visually display hotels from Archipelago Hotels & Resorts across Indonesia and Southeast Asia. It exposes four MCP tools backed by a central MySQL catalog and per-brand databases, fetches live room rates from the SimpleBooking XML API, and renders an interactive hotel dashboard as an embedded MCP App resource.
+
+Supported brands: Aston, Grand Aston, The Alana, Harper, Hotel NEO, favehotels, Kamuela, Quest, Huxley, Nordic, Four Corners, PBA.
+
+Transports: stdio (Claude Desktop, Pi Agent) and Streamable HTTP on :9011.
+
+## Links
+
+- [Reference — Tools API](reference/tools-api.md)
+- [Reference — Environment Variables](reference/env-vars.md)
+- [Reference — Data Models](reference/data-models.md)
+- [How-To — Build and Run](how-to/build-and-run.md)
+- [How-To — Connect Claude Desktop](how-to/connect-claude-desktop.md)
+- [Explanation — Architecture](explanation/architecture.md)
+- [Explanation — Rate Fallback Logic](explanation/rate-fallback.md)
+- [ADR — Database Strategy](adr/)
+- [Tutorials](tutorials/)
+
+## Codebase
+
+- `cmd/archipelago-hotels-mcp/` — Entry point. Parses `stdio`/`http` subcommands, wires DB pool and rate service.
+- `internal/server/` — MCP server construction, tool registration, Gin HTTP handler with CORS, `/dashboard`, `/api/hotels`, `/api/brands`, `/api/regions`, `/health` endpoints.
+- `internal/tools/` — Four MCP tool handlers: `search.go`, `recommend.go`, `detail.go`, `dashboard.go`.
+- `internal/repository/` — MySQL data access layer. `repository.go` manages the `Pool` (central + lazy per-brand connections). `hotel.go` implements `SearchHotels`, `GetHotelByID`, `GetThumbnails`, `resizeImageURL`. `room.go` fetches room rows from brand DBs.
+- `internal/rate/` — Rate orchestration. `rate.go` implements `Service.GetRates` with SimpleBooking → stored → starting_price fallback chain and a 5-minute in-memory cache. `simplebooking.go` posts to the SimpleBooking XML API. `cache.go` is the TTL cache. `sentec.go` is reserved for the Sentec REST API (not yet in use).
+- `internal/resources/` — `dashboard.go` registers the MCP App resource URI. `mcp-app.html` is the embedded Vite-built interactive UI.
+- `ui/` — Vite + TypeScript source for the MCP App dashboard. Built with `make build-ui`, output copied to `internal/resources/mcp-app.html`.
+
+---
+
+## Tool API Reference
+
+### search_hotels
+
+Search Archipelago hotels by city, country, brand, or free-text query. Returns up to 50 hotels with live pricing and thumbnail URLs.
+
+**Input schema:**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "city":    { "type": "string", "description": "City name (e.g. Jakarta, Bali, Yogyakarta)." },
+    "country": { "type": "string", "description": "Country filter." },
+    "brand":   { "type": "string", "description": "Brand filter (e.g. Aston, Harper, NEO)." },
+    "query":   { "type": "string", "description": "Free-text search against hotel name and brand name." }
+  }
+}
+```
+
+All fields optional. Country defaults to `"Indonesia"` when omitted. Matching is case-insensitive LIKE on all supplied fields.
+
+**Returns:** `searchResult`
+
+```json
+{
+  "hotels":   [ /* hotelSummary[] */ ],
+  "total":    42,
+  "filtered": 12,
+  "city":     "Bali",
+  "country":  "Indonesia"
+}
+```
+
+**MCP meta:** `ui.resourceUri` is set so Claude Desktop renders the result in the embedded dashboard. `ui.resourceDomains` allowlists `images.archipelagohotels.com` for thumbnails.
+
+---
+
+### recommend_hotel
+
+Rank Archipelago hotels in a destination by vibe, budget tier, and trip purpose. Returns hotels sorted by score (highest first) plus a human-readable recommendation sentence.
+
+**Input schema:**
+
+```json
+{
+  "type": "object",
+  "required": ["destination"],
+  "properties": {
+    "destination": { "type": "string", "description": "Destination city or area." },
+    "vibe":        { "type": "string", "description": "luxury | romantic | business | family | culture | nature | budget" },
+    "budget":      { "type": "string", "description": "budget | midscale | upscale | luxury" },
+    "purpose":     { "type": "string", "description": "leisure | business | honeymoon | family | solo" }
+  }
+}
+```
+
+**Budget price bands (IDR per night):**
+
+| Tier      | Range              |
+|-----------|--------------------|
+| budget    | <= 500,000         |
+| midscale  | 500,001–1,000,000  |
+| upscale   | 1,000,001–2,500,000|
+| luxury    | > 2,500,000 or 5-star |
+
+**Returns:** `recommendResult`
+
+```json
+{
+  "recommendation": "I found 8 Archipelago hotels in Bali matching a 'romantic' vibe. Top pick: Kamuela Villas Seminyak (Kamuela). romantic setting.",
+  "hotels":      [ /* hotelSummary[], ranked by score */ ],
+  "destination": "Bali",
+  "vibe":        "romantic",
+  "budget":      "upscale"
+}
+```
+
+---
+
+### find_hotels
+
+Browse the full hotel portfolio with optional city/brand filters. Returns up to 200 hotels. Intended for "show all hotels" or "open the hotel list" requests.
+
+**Input schema:**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "city":  { "type": "string", "description": "City filter (optional)." },
+    "brand": { "type": "string", "description": "Brand filter (optional)." }
+  }
+}
+```
+
+**Returns:** `dashboardData`
+
+```json
+{
+  "filter":  "Jakarta",
+  "hotels":  [ /* hotelSummary[] */ ],
+  "total":   35,
+  "match":   35,
+  "message": "Showing 35 hotels in Jakarta"
+}
+```
+
+---
+
+### get_hotel_detail
+
+Fetch full detail for a single hotel including all room types, live rates, address, and coordinates. Visibility is `"app"` — the dashboard UI calls it directly; it is hidden from Claude's tool picker.
+
+**Input schema:**
+
+```json
+{
+  "type": "object",
+  "required": ["hotelId"],
+  "properties": {
+    "hotelId": { "type": "string", "description": "Numeric hotel ID (central DB hotel_id as a string, e.g. \"42\")." }
+  }
+}
+```
+
+**Returns:** hotel detail object
+
+```json
+{
+  "id":           "42",
+  "name":         "Aston Sudirman Jakarta",
+  "brand":        "Aston",
+  "city":         "Jakarta",
+  "country":      "Indonesia",
+  "address":      "Jl. Jend. Sudirman ...",
+  "rating":       8.7,
+  "stars":        4,
+  "latitude":     -6.2088,
+  "longitude":    106.8456,
+  "currency":     "IDR",
+  "imageStyle":   "bg-gradient-to-br from-blue-800 to-sky-700",
+  "brandColor":   "#003087",
+  "thumbnail":    "https://images.archipelagohotels.com/...",
+  "startingPrice": 850000,
+  "roomTypes": [
+    {
+      "name":          "Deluxe Room",
+      "pricePerNight": 850000,
+      "baseRate":      750000,
+      "currency":      "IDR",
+      "maxGuests":     2,
+      "rateSource":    "simplebooking"
+    }
+  ]
+}
+```
+
+`roomTypes` is present only when rates are available from SimpleBooking or stored room data. `rateSource` is one of `"simplebooking"`, `"stored"`, or `"starting_price"`.
+
+---
+
+## Data Models
+
+### HotelRow (internal/repository)
+
+Central DB representation of a hotel.
+
+| Field         | Type           | Notes                                              |
+|---------------|----------------|----------------------------------------------------|
+| HotelID       | int            | Primary key in `db_archipelagowebsite.tb_hotels`   |
+| APIHotelID    | sql.NullInt64  | Per-brand DB hotel_id; nil if not mapped           |
+| BrandID       | int            | FK to `tb_brands`                                  |
+| BrandName     | string         | e.g. `"Aston"`, `"favehotels"`                    |
+| DBPrefix      | string         | Per-brand DB prefix, e.g. `"aston"`, `"favehotel"` |
+| RegionName    | string         | City/region from `tb_region`                       |
+| Name          | string         | Hotel display name                                 |
+| Address       | string         | Street address                                     |
+| Rating        | float64        | Guest rating 0–10                                  |
+| Stars         | int            | Derived: rating>=9→5, >=8→4, >=7→3, >=6→2, else 1 |
+| Latitude      | float64        |                                                    |
+| Longitude     | float64        |                                                    |
+| StartingPrice | float64        | Fallback price from central DB                     |
+| Currency      | string         | e.g. `"IDR"`                                       |
+| ImageStyle    | string         | Tailwind gradient class for card backgrounds       |
+| BrandColor    | string         | Hex brand color from `tb_brands`                   |
+
+### RoomRate (internal/rate)
+
+Single room's pricing from any source.
+
+| Field        | Type    | Notes                                        |
+|--------------|---------|----------------------------------------------|
+| Name         | string  | Room type name                               |
+| RatePerNight | float64 | Total per night including tax                |
+| BaseRate     | float64 | Pre-discount rate (SimpleBooking only)       |
+| Source       | string  | `"simplebooking"` | `"stored"` | `"starting_price"` |
+
+### SearchParams (internal/repository)
+
+| Field   | Type   | Notes                         |
+|---------|--------|-------------------------------|
+| City    | string | Matched against region_name and hotel_address |
+| Country | string | Matched against region_name; ignored when "Indonesia" |
+| Brand   | string | Matched against brand_name    |
+| Query   | string | Matched against hotel_name and brand_name |
+| Limit   | int    | 0 = unlimited                 |
+| Offset  | int    | Pagination offset              |
+
+### hotelSummary (tools layer — returned by all tools)
+
+| Field      | Type     | Notes                            |
+|------------|----------|----------------------------------|
+| id         | string   | Central DB hotel_id as string    |
+| name       | string   |                                  |
+| brand      | string   |                                  |
+| city       | string   | region_name                      |
+| country    | string   |                                  |
+| rating     | float64  |                                  |
+| stars      | int      |                                  |
+| priceFrom  | float64  | Best available rate, or starting_price |
+| currency   | string   |                                  |
+| imageStyle | string   | Tailwind gradient class          |
+| brandColor | string   | Hex color                        |
+| thumbnail  | string   | Resized CDN URL or empty         |
+| tags       | []string | Heuristic: beach/city, business, resort, premium |
+
+---
+
+## Environment Variables
+
+| Variable           | Default                               | Description                                                   |
+|--------------------|---------------------------------------|---------------------------------------------------------------|
+| `MYSQL_HOST`       | `127.0.0.1`                           | MySQL host for the central DB                                 |
+| `MYSQL_PORT`       | `3306`                                | MySQL port                                                    |
+| `MYSQL_USER`       | `root`                                | MySQL username                                                |
+| `MYSQL_PASS`       | _(empty)_                             | MySQL password                                                |
+| `MYSQL_DB`         | `db_archipelagowebsite`               | Central database name                                         |
+| `url_image_resizer`| `https://images.archipelagohotels.com/` | Base URL for the Archipelago image resizer proxy             |
+| `DEBUG`            | _(unset)_                             | Set to `1` to enable debug-level structured logging to stderr |
+
+Per-brand databases are accessed on the same host/port/user/pass as the central DB. Database names follow the pattern `db_{prefix}website` (e.g. `db_astonwebsite`), with exceptions: `favehotel` → `db_favewebsite`, `pba` → `db_pba`.
+
+---
+
+## Architecture Summary
+
+```
+Claude Desktop / Agent
+        |
+        | MCP (stdio or Streamable HTTP :9011)
+        v
+  archipelago-hotels-mcp (Go binary)
+        |
+        |-- tools/search.go        search_hotels
+        |-- tools/recommend.go     recommend_hotel
+        |-- tools/dashboard.go     find_hotels
+        |-- tools/detail.go        get_hotel_detail (app-only)
+        |
+        |-- repository/Pool
+        |     |-- central MySQL    db_archipelagowebsite
+        |     |     tb_hotels, tb_brands, tb_region
+        |     |
+        |     \-- per-brand MySQL  db_{prefix}website  (lazy connect)
+        |           tb_hotels (thumbnail_desktop)
+        |           tb_hrooms / tb_hroom (room_rate)
+        |           tb_websetup (booking credentials)
+        |
+        \-- rate/Service
+              |-- SimpleBooking XML API  (live, with circuit breaker + 5min cache)
+              |-- stored tb_hrooms.room_rate  (fallback)
+              \-- hotel_starting_price from central DB  (last resort)
+```
+
+The MCP App resource (`archipelago://hotels-dashboard`) is an embedded Vite-built HTML file. Claude Desktop renders it in an iframe alongside tool results. The iframe calls `/api/hotels`, `/api/brands`, `/api/regions`, and `get_hotel_detail` (via MCP) for its data.
+
+---
+
+## Rate Fallback Logic
+
+`rate.Service.GetRates(ctx, dbPrefix, apiHotelID, checkIn, checkOut)` proceeds:
+
+1. **Cache check** — 5-minute TTL keyed on `dbPrefix:apiHotelID`. Hit returns immediately.
+2. **SimpleBooking live API** — Loads `BrandCredentials` from `tb_websetup` in the brand DB. Calls `https://xml.simplebooking.it/xmlservice.asmx/HotelAvailRQ` with the hotel's XML credentials. A circuit breaker (5 failures → 120 s cooldown) prevents thundering-herd retries. On success, caches and returns `RoomRate[]` with `Source: "simplebooking"`.
+3. **Stored rates fallback** — Queries `tb_hrooms.room_rate` (or `tb_hroom` depending on brand schema) for pre-loaded rates. Returns `RoomRate[]` with `Source: "stored"`.
+4. **No rates** — Returns nil. Callers then use `HotelRow.StartingPrice` from the central DB, labelled `Source: "starting_price"`.
+
+`BatchMinRates` fetches rates for a slice of hotels in parallel using a bounded goroutine pool (max 5 workers). It returns `map[hotelID]float64` of minimum rates, falling back to `StartingPrice` per hotel when no live or stored rates exist.
+
+`checkIn`/`checkOut` are `YYYY-MM-DD`. If empty, they default to today and tomorrow.
+
+---
+
+## Image URL Transform Logic
+
+`resizeImageURL(img, width, height, location)` in `internal/repository/hotel.go`:
+
+1. Extracts the subdomain from the CDN URL using a regex.
+2. Maps `sentineltech.*` → bucket `sentineltech-publicwebsite`; all others use the second URL segment as the bucket name.
+3. Builds a new URL using the `url_image_resizer` base (default `https://images.archipelagohotels.com/`).
+4. Appends resize query parameters:
+   - width=0, height=0 → no resize params (original dimensions)
+   - width only → `?s={width}&location={location}`
+   - both → `?d={width}x{height}&location={location}`
+
+`GetThumbnails` calls this for every hotel's `thumbnail_desktop` field. Width and height are both 0 (no resize), so thumbnails are served at original CDN size via the resizer proxy.
+
+---
+
+## Build Commands
+
+```bash
+# Full build: Vite UI + Go binary
+make build
+
+# Go binary only (uses existing internal/resources/mcp-app.html)
+make build-go
+# or
+go build -o bin/archipelago-hotels-mcp ./cmd/archipelago-hotels-mcp
+
+# Install to GOPATH/bin
+make install
+# or
+go install ./cmd/archipelago-hotels-mcp
+
+# Run stdio transport
+make run-stdio
+# or
+bin/archipelago-hotels-mcp stdio
+
+# Run HTTP transport with debug logging on :9011
+make dev-http
+# or
+bin/archipelago-hotels-mcp http -addr :9011 -verbose
+
+# Lint
+make lint
+# or
+go vet ./...
+
+# Clean
+make clean
+```
+
+The `ui/` Vite build requires Node.js and npm. The binary embeds `internal/resources/mcp-app.html` at compile time; `make build-fast` skips the UI build when the HTML file is already present.
+
+---
+
+## Common Patterns for Agents
+
+**Search hotels in a city:**
+```
+Tool: search_hotels
+Input: { "city": "Bali" }
+```
+
+**Recommend luxury hotels for a honeymoon:**
+```
+Tool: recommend_hotel
+Input: { "destination": "Bali", "vibe": "romantic", "budget": "luxury", "purpose": "honeymoon" }
+```
+
+**Browse all hotels (open dashboard):**
+```
+Tool: find_hotels
+Input: {}
+```
+
+**Filter dashboard by brand:**
+```
+Tool: find_hotels
+Input: { "brand": "Harper" }
+```
+
+**Get full hotel detail with room rates:**
+```
+Tool: get_hotel_detail
+Input: { "hotelId": "42" }
+```
+Note: `get_hotel_detail` visibility is `"app"` — it is intended to be called by the embedded dashboard UI, not directly by agents in Claude's tool list.
+
+**Degraded mode:** The server starts even when the MySQL central DB is unreachable. All tool calls will return errors in that state. The `/health` endpoint returns `{ "status": "degraded", "db": false }`.
+
+**Rate currency:** All prices are in the hotel's native currency (nearly always `IDR` — Indonesian Rupiah). No conversion is performed.
+
+**Hotel ID format:** The `hotelId` parameter for `get_hotel_detail` is the central DB `hotel_id` as a decimal string (e.g. `"42"`), not a slug. Tools return this as the `id` field in `hotelSummary`.
