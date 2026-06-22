@@ -59,12 +59,17 @@ Search, recommend, and explore hotels across 13 Archipelago brands (Aston, The A
 
 	svc := &Service{DB: dbPool, RateSvc: rateSvc, MCP: s}
 
+	// Discover brand CDN hostnames for the iframe CSP resourceDomains allowlist.
+	if dbPool != nil {
+		dbPool.SetThumbnailDomains(dbPool.ThumbnailDomains(context.Background()))
+	}
+
 	tools.RegisterSearch(s, svc.DB, svc.RateSvc)
 	tools.RegisterDetail(s, svc.DB, svc.RateSvc)
 	tools.RegisterRecommend(s, svc.DB, svc.RateSvc)
 	tools.RegisterDashboardTool(s, svc.DB, svc.RateSvc)
 
-	resources.RegisterDashboardResource(s)
+	resources.RegisterDashboardResource(s, dbPool.ImageDomains())
 
 	return svc
 }

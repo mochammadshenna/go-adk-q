@@ -17,7 +17,8 @@ var dashboardHTML string
 func DashboardHTML() string { return dashboardHTML }
 
 // RegisterDashboardResource registers the hotel dashboard HTML resource with MCP Apps MIME type.
-func RegisterDashboardResource(s *mcp.Server) {
+// domains is the list of image CDN hostnames to allow in the iframe CSP.
+func RegisterDashboardResource(s *mcp.Server, domains []string) {
 	s.AddResource(&mcp.Resource{
 		URI:         ResourceURI,
 		Name:        "Archipelago Hotels Dashboard",
@@ -25,7 +26,9 @@ func RegisterDashboardResource(s *mcp.Server) {
 		MIMEType:    "text/html;profile=mcp-app",
 		Meta: mcp.Meta{
 			"ui": map[string]any{
-				"resourceDomains": []string{"images.archipelagohotels.com"},
+				"csp": map[string]any{
+					"resourceDomains": domains,
+				},
 			},
 		},
 	}, func(ctx context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {

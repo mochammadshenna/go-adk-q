@@ -4,8 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
+	"net/url"
 	"os"
-	"regexp"
 	"strings"
 	"sync"
 )
@@ -182,9 +183,9 @@ func (p *Pool) HotelCount(ctx context.Context) (int, error) {
 	return n, err
 }
 
-// GetThumbnails fetches thumbnail_desktop URLs from brand databases, then proxies each
-// image to a base64 data URI so Claude Desktop's iframe CSP cannot block them.
-// Hotels with no URL, unreachable brand DB, or images > 200 KB are omitted.
+// GetThumbnails fetches thumbnail_desktop URLs from brand databases and rewrites them
+// through the Archipelago image resizer (pure string transform, no HTTP fetch).
+// Hotels with no URL or an unreachable brand DB are omitted from the result.
 func (p *Pool) GetThumbnails(ctx context.Context, hotels []HotelRow) map[int]string {
 	type entry struct{ centralID, apiID int }
 	byPrefix := make(map[string][]entry)
@@ -206,7 +207,12 @@ func (p *Pool) GetThumbnails(ctx context.Context, hotels []HotelRow) map[int]str
 		go func() {
 			defer wg.Done()
 			db := p.BrandDB(ctx, prefix)
-			if db == nil || !p.HasColumn(prefix, "tb_hotels", "thumbnail_desktop") {
+			if db == nil {
+				slog.Debug("GetThumbnails: brand DB unreachable", "prefix", prefix)
+				return
+			}
+			if !p.HasColumn(prefix, "tb_hotels", "thumbnail_desktop") {
+				slog.Debug("GetThumbnails: thumbnail_desktop column absent", "prefix", prefix)
 				return
 			}
 			ids := make([]any, len(entries))
@@ -239,16 +245,83 @@ func (p *Pool) GetThumbnails(ctx context.Context, hotels []HotelRow) map[int]str
 	}
 	wg.Wait()
 
-	// Phase 2: rewrite CDN URLs through the Archipelago image resizer (pure string transform).
+	// Phase 2: rewrite raw brand CDN URLs → images.archipelagohotels.com proxy.
+	// Matches PHP imageresizestandard(): bucket = second DNS label of origin hostname.
 	result := make(map[int]string, len(urls))
 	for cid, thumbURL := range urls {
-		result[cid] = resizeImageURL(thumbURL, 0, 0, "center")
+		rewritten := resizeImageURL(thumbURL, 0, 0, "")
+		slog.Debug("GetThumbnails: url", "hotelID", cid, "raw", thumbURL, "rewritten", rewritten)
+		result[cid] = rewritten
 	}
+	slog.Debug("GetThumbnails: done", "fetched", len(urls), "hotels", len(hotels))
 	return result
 }
 
+// ThumbnailDomains scans all brand DBs for distinct thumbnail_desktop hostnames.
+// Called once at server startup to populate resourceDomains for the MCP iframe CSP.
+func (p *Pool) ThumbnailDomains(ctx context.Context) []string {
+	if p == nil {
+		return nil
+	}
+
+	p.mu.RLock()
+	prefixes := make([]string, 0, len(p.brands))
+	seen := make(map[string]bool)
+	for _, b := range p.brands {
+		if b.DBPrefixName != "" && !seen[b.DBPrefixName] {
+			seen[b.DBPrefixName] = true
+			prefixes = append(prefixes, b.DBPrefixName)
+		}
+	}
+	p.mu.RUnlock()
+
+	var mu sync.Mutex
+	hostSeen := make(map[string]bool)
+	var hosts []string
+	var wg sync.WaitGroup
+
+	for _, prefix := range prefixes {
+		prefix := prefix
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			db := p.BrandDB(ctx, prefix)
+			if db == nil || !p.HasColumn(prefix, "tb_hotels", "thumbnail_desktop") {
+				return
+			}
+			rows, err := db.QueryContext(ctx,
+				"SELECT DISTINCT thumbnail_desktop FROM tb_hotels WHERE thumbnail_desktop IS NOT NULL AND thumbnail_desktop != '' LIMIT 50")
+			if err != nil {
+				return
+			}
+			defer rows.Close()
+			mu.Lock()
+			defer mu.Unlock()
+			for rows.Next() {
+				var thumb string
+				if rows.Scan(&thumb) != nil {
+					continue
+				}
+				parsed, err := url.Parse(thumb)
+				if err != nil || parsed.Host == "" {
+					continue
+				}
+				host := parsed.Hostname()
+				if !hostSeen[host] {
+					hostSeen[host] = true
+					hosts = append(hosts, host)
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	slog.Info("ThumbnailDomains: scanned brand DBs", "domains", hosts)
+	return hosts
+}
+
 // resizeImageURL rewrites a brand CDN URL through the Archipelago image resizer.
-// Ported from ResizeImage in the Sentec platform codebase.
+// Bucket name = second DNS label of origin hostname (e.g. "astonwebsite" from
+// storage.astonwebsite.com). Sentineltech hosts always map to "sentineltech-publicwebsite".
 // Base URL from env url_image_resizer; defaults to https://images.archipelagohotels.com/.
 func resizeImageURL(img string, width, height int, location string) string {
 	if img == "" {
@@ -258,34 +331,40 @@ func resizeImageURL(img string, width, height int, location string) string {
 	if urlImage == "" {
 		urlImage = "https://images.archipelagohotels.com/"
 	}
-	bucketName := ""
-	r := regexp.MustCompile(`^(?:https?://)?(?:www\.)?([^/]+)`)
-	matches := r.FindStringSubmatch(img)
-	if len(matches) >= 2 {
-		urls := strings.Split(matches[1], ".")
-		if urls[0] == "sentineltech" {
-			bucketName = "sentineltech-publicwebsite"
-		} else if len(urls) >= 2 {
-			bucketName = urls[1]
-		}
-	}
-	baseURL := urlImage + bucketName + "/"
-	cdn := strings.Split(img, ".")
-	if len(cdn) < 2 {
+
+	parsed, err := url.Parse(img)
+	if err != nil || parsed.Host == "" {
 		return img
 	}
-	trim := strings.Replace(img, cdn[0]+"."+cdn[1]+"."+"com/", "", 1)
-	var link string
-	if width == 0 && height == 0 {
-		link = baseURL + trim
-	} else if width != 0 && height == 0 {
-		link = baseURL + trim + "?s=" + fmt.Sprint(width) + "&location=" + location
-	} else if height == 0 || width == 0 {
-		link = baseURL + trim + "?location=" + location
-	} else {
-		link = baseURL + trim + "?d=" + fmt.Sprintf("%dx%d", width, height) + "&location=" + location
+
+	parts := strings.Split(parsed.Hostname(), ".")
+	var bucketName string
+	switch {
+	case len(parts) >= 1 && parts[0] == "sentineltech":
+		bucketName = "sentineltech-publicwebsite"
+	case len(parts) >= 3:
+		bucketName = parts[1]
+	case len(parts) >= 1:
+		bucketName = parts[0]
 	}
-	return link
+	// PHP special case: astonhotelsinternational.com → astoninternational bucket
+	if bucketName == "astonhotelsinternational" {
+		bucketName = "astoninternational"
+	}
+
+	path := strings.TrimPrefix(parsed.Path, "/")
+	base := strings.TrimRight(urlImage, "/") + "/" + bucketName + "/"
+
+	switch {
+	case width == 0 && height == 0:
+		return base + path
+	case width != 0 && height == 0:
+		return base + path + "?s=" + fmt.Sprint(width) + "&location=" + location
+	case height == 0 || width == 0:
+		return base + path + "?location=" + location
+	default:
+		return base + path + "?d=" + fmt.Sprintf("%dx%d", width, height) + "&location=" + location
+	}
 }
 
 // scanHotel scans a HotelRow from a single result row.

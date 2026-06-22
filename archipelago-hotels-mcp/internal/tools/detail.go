@@ -22,6 +22,9 @@ func RegisterDetail(s *mcp.Server, pool *repository.Pool, rateSvc *rate.Service)
 			"ui": map[string]any{
 				"resourceUri": resources.ResourceURI,
 				"visibility":  []string{"app"},
+				"csp": map[string]any{
+					"resourceDomains": pool.ImageDomains(),
+				},
 			},
 		},
 		InputSchema: map[string]any{

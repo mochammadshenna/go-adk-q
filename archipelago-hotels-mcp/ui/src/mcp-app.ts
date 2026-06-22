@@ -365,9 +365,9 @@ const STYLES = `
     --text-3: #94a3b8;
     --border: rgba(0,0,0,0.08);
     --border-h: rgba(0,0,0,0.16);
-    --gold: #d97706;
-    --gold-dim: rgba(217,119,6,0.08);
-    --gold-border: rgba(217,119,6,0.2);
+    --gold: #00215B;
+    --gold-dim: rgba(0,33,91,0.08);
+    --gold-border: rgba(0,33,91,0.2);
     --r-sm: 8px;
     --r-md: 12px;
     --r-lg: 16px;
@@ -377,7 +377,7 @@ const STYLES = `
   }
 
   body {
-    font-family: var(--font-sans, 'Inter', system-ui, sans-serif);
+    font-family: 'Zen Kaku Gothic New', var(--font-sans, system-ui, sans-serif);
     background: var(--color-background-primary, var(--bg-0));
     color: var(--color-text-primary, var(--text-1));
     line-height: 1.5;
@@ -585,26 +585,30 @@ const STYLES = `
   .stars-filled { color: #fbbf24; }
   .stars-empty  { color: rgba(255,255,255,0.25); }
 
-  /* ── Card body ── */
-  .card-body { padding: 10px 12px; flex: 1; display: flex; flex-direction: column; gap: 6px; }
-  .card-location { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text-2); }
-  .card-location svg { width: 12px; height: 12px; flex-shrink: 0; }
-
-  .card-tags { display: flex; gap: 4px; flex-wrap: wrap; }
-  .tag {
-    font-size: 10px; font-weight: 500; padding: 2px 8px; border-radius: 20px;
-    background: var(--bg-3); color: var(--text-2); border: 1px solid var(--border);
+  /* ── Header icon ── */
+  .header-icon-a {
+    background: #00215B; color: #fff; width: 40px; height: 40px; border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 20px; font-weight: 900; flex-shrink: 0;
   }
+
+  /* ── Card body ── */
+  .card-body { padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+  .card-location { display: flex; align-items: flex-start; justify-content: flex-end; gap: 5px; font-size: 12px; color: var(--text-2); }
+  .card-location svg { width: 12px; height: 12px; flex-shrink: 0; margin-top: 1px; }
+  .card-location-text { line-height: 1.4; text-align: right; }
 
   /* ── Card footer ── */
   .card-footer {
-    display: flex; align-items: flex-end; justify-content: space-between;
-    padding: 0 12px 12px; gap: 8px;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 12px; gap: 8px;
   }
-  .price-block { display: flex; flex-direction: column; gap: 6px; }
+  .price-block { display: flex; flex-direction: column; gap: 2px; }
   .price-from { font-size: 9px; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.05em; }
-  .price-val { font-size: 20px; font-weight: 800; letter-spacing: -0.02em; line-height: 1; }
-  .price-night { font-size: 10px; color: var(--text-3); }
+  .price-row { display: flex; align-items: baseline; gap: 3px; }
+  .price-val { font-size: 24px; font-weight: 800; letter-spacing: -0.02em; line-height: 1; }
+  .price-night { font-size: 11px; color: var(--text-3); }
+  .price-na { font-size: 11px; color: var(--text-3); font-style: italic; }
 
   .btn-rooms {
     font-family: inherit; font-size: 12px; font-weight: 600;
@@ -697,7 +701,7 @@ const STYLES = `
 
   .room-card-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
   .room-name { font-size: 14px; font-weight: 700; line-height: 1.2; }
-  .room-price-block { text-align: right; flex-shrink: 0; display: flex; flex-direction: column; gap: 4px; }
+  .room-price-block { text-align: right; flex-shrink: 0; display: flex; flex-direction: row; align-items: baseline; gap: 4px; }
   .room-price { font-size: 16px; font-weight: 800; letter-spacing: -0.02em; }
   .room-price-night { font-size: 10px; color: var(--text-3); }
 
@@ -722,12 +726,12 @@ const STYLES = `
 
   /* Starting price callout */
   .starting-callout {
-    background: var(--gold-dim); border: 1px solid var(--gold-border);
+    background: #eaf9ed; border: 1px solid var(--gold-border);
     border-radius: var(--r-sm); padding: 10px 12px; margin-bottom: 14px;
     display: flex; align-items: center; justify-content: space-between;
   }
   .starting-callout-label { font-size: 11px; color: var(--text-2); }
-  .starting-callout-price { font-size: 18px; font-weight: 800; color: var(--gold); }
+  .starting-callout-price { font-size: 18px; font-weight: 800; color: #2BC14B; }
 
   /* No rooms */
   .no-rooms {
@@ -763,6 +767,10 @@ const STYLES = `
 `;
 
 function injectStyles(): void {
+  const link = document.createElement("link");
+  link.rel = "stylesheet";
+  link.href = "https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700;900&display=swap";
+  document.head.appendChild(link);
   const s = document.createElement("style");
   s.textContent = STYLES;
   document.head.appendChild(s);
@@ -778,7 +786,7 @@ function buildDOM(): void {
   <div id="app">
 
     <div id="loading-state">
-      <div class="loading-emoji">🏨</div>
+      <div class="loading-emoji"><svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect width="16" height="20" x="4" y="2" rx="2"/><path d="M9 22v-4h6v4"/><path d="M8 6h.01"/><path d="M16 6h.01"/><path d="M12 6h.01"/><path d="M12 10h.01"/><path d="M16 10h.01"/><path d="M8 10h.01"/><path d="M12 14h.01"/><path d="M16 14h.01"/><path d="M8 14h.01"/></svg></div>
       <div class="loading-title">Archipelago Hotels</div>
       <div class="loading-sub">Discovering properties across Indonesia…</div>
       <div class="skeleton-grid">
@@ -797,7 +805,7 @@ function buildDOM(): void {
     <div id="dashboard-content" class="hidden">
       <div class="app-header">
         <div class="header-brand">
-          <img class="header-icon" src="data:image/png;base64,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" alt="Archipelago Hotels">
+          <div class="header-icon-a">A</div>
           <div>
             <div class="header-name">Archipelago Hotels</div>
             <div class="header-sub" id="header-sub">Searching…</div>
@@ -841,7 +849,7 @@ function buildDOM(): void {
         <button class="overlay-close" id="overlay-close" aria-label="Close">✕</button>
         <div id="overlay-content">
           <div style="padding:80px 24px;text-align:center;color:var(--text-2)">
-            <div style="font-size:28px;margin-bottom:10px;animation:pulse 1.5s infinite">🏨</div>
+            <div style="margin-bottom:10px;animation:pulse 1.5s infinite"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect width="16" height="20" x="4" y="2" rx="2"/><path d="M9 22v-4h6v4"/><path d="M8 6h.01"/><path d="M16 6h.01"/><path d="M12 6h.01"/><path d="M12 10h.01"/><path d="M16 10h.01"/><path d="M8 10h.01"/><path d="M12 14h.01"/><path d="M16 14h.01"/><path d="M8 14h.01"/></svg></div>
             <div>Loading room details…</div>
           </div>
         </div>
@@ -963,7 +971,7 @@ function renderHotels(hotels: HotelSummary[]): void {
     return `
     <article class="hotel-card" style="animation-delay:${delay}" data-id="${esc(h.id)}" data-name="${esc(h.name)}">
       <div class="card-photo">
-        <div class="card-photo-bg" style="background:${gradient}">${h.thumbnail ? `<img class="card-photo-thumb" src="${esc(h.thumbnail)}" alt="" loading="lazy" onerror="this.remove()">` : ""}</div>
+        <div class="card-photo-bg" style="background:${gradient}">${h.thumbnail ? `<img class="card-photo-thumb" src="${esc(h.thumbnail)}" alt="" loading="lazy" onerror="console.warn('[hotels-mcp] img failed:',this.src);this.remove()">` : ""}</div>
         <div class="card-photo-content">
           <div class="card-photo-top">
             <span class="brand-badge" style="background:${theme.badge};color:${theme.badgeText}">${esc(h.brand)}</span>
@@ -984,16 +992,14 @@ function renderHotels(hotels: HotelSummary[]): void {
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/>
           </svg>
-          <span>${esc(h.city)}${h.country ? ", " + esc(h.country) : ""}</span>
+          <div class="card-location-text">${h.city ? `<strong>${esc(h.city)}</strong>${h.country ? ", " + esc(h.country) : ""}` : esc(h.country ?? "")}</div>
         </div>
-        ${h.tags && h.tags.length > 0 ? `
-        <div class="card-tags">${h.tags.map(t => `<span class="tag">${esc(t)}</span>`).join("")}</div>` : ""}
       </div>
       <div class="card-footer">
         <div class="price-block">
           ${h.priceFrom > 0
-            ? `<span class="price-from">From</span><span class="price-val" style="color:${theme.accent}">${fmtPriceShort(h.priceFrom, h.currency)}</span><span class="price-night">/night</span>`
-            : `<span class="price-from" style="color:var(--text-3)">Contact for rates</span>`
+            ? `<span class="price-from">Start from</span><div class="price-row"><span class="price-val" style="color:${theme.accent}">${fmtPriceShort(h.priceFrom, h.currency)}</span><span class="price-night">/night</span></div>`
+            : `<span class="price-na">Rate not Available</span>`
           }
         </div>
         <button class="btn-rooms" style="background:linear-gradient(135deg,${theme.gradFrom},${theme.gradMid})">View Rooms</button>
@@ -1078,7 +1084,7 @@ function renderRoomDetail(detail: HotelDetail): string {
   const stars = deriveStars(detail.rating, detail.stars);
   const rooms = detail.roomTypes ?? [];
   const heroThumb = detail.thumbnail
-    ? `<img class="overlay-hero-thumb" src="${esc(detail.thumbnail)}" alt="" loading="lazy" onerror="this.remove()">`
+    ? `<img class="overlay-hero-thumb" src="${esc(detail.thumbnail)}" alt="" loading="lazy" onerror="console.warn('[hotels-mcp] img failed:',this.src);this.remove()">`
     : "";
 
   return `
@@ -1089,7 +1095,7 @@ function renderRoomDetail(detail: HotelDetail): string {
         <div class="overlay-hotel-meta">
           <span class="brand-badge" style="background:${theme.badge};color:${theme.badgeText}">${esc(detail.brand)}</span>
           ${detail.rating > 0 ? `<span class="overlay-rating-badge" style="background:${ratingBg(detail.rating)}">${detail.rating.toFixed(1)}/10</span>` : ""}
-          <span class="overlay-city">${esc(detail.city)}${detail.country ? ", " + esc(detail.country) : ""}</span>
+          <span class="overlay-city">${esc(detail.city)}${detail.country ? `<br><small>${esc(detail.country)}</small>` : ""}</span>
           ${stars > 0 ? `<span class="overlay-stars">${starsHtml(stars)}</span>` : ""}
         </div>
       </div>
@@ -1118,10 +1124,8 @@ function renderRoomDetail(detail: HotelDetail): string {
     </div>`;
 }
 
-function renderRoomCard(room: RoomType, theme: BrandTheme, brand: string): string {
+function renderRoomCard(room: RoomType, theme: BrandTheme, _brand: string): string {
   const bedType = deriveBedType(room.name);
-  const amenities = deriveAmenities(room.name, brand);
-  const badge = rateSourceBadge(room.rateSource ?? "stored");
 
   return `
   <div class="room-card">
@@ -1129,20 +1133,16 @@ function renderRoomCard(room: RoomType, theme: BrandTheme, brand: string): strin
       <div style="flex:1;min-width:0">
         <div class="room-name">${esc(room.name)}</div>
         <div class="room-details">
-          <span class="room-detail-item">🛏 ${esc(bedType)}</span>
-          ${room.maxGuests > 0 ? `<span class="room-detail-item">· 👥 ${room.maxGuests} guest${room.maxGuests !== 1 ? "s" : ""}</span>` : ""}
+          <span class="room-detail-item">${esc(bedType)}</span>
+          ${room.maxGuests > 0 ? `<span class="room-detail-item">· <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg> ${room.maxGuests} guest${room.maxGuests !== 1 ? "s" : ""}</span>` : ""}
         </div>
       </div>
       <div class="room-price-block">
         ${room.pricePerNight > 0
           ? `<div class="room-price" style="color:${theme.accent}">${fmtPriceShort(room.pricePerNight, room.currency)}</div><div class="room-price-night">/night</div>`
-          : `<div class="room-price-night">— unavailable</div>`
+          : `<div class="room-price-night">Rate not Available</div>`
         }
-        ${badge}
       </div>
-    </div>
-    <div class="room-amenities">
-      ${amenities.map(a => `<span class="amenity-chip">${esc(a)}</span>`).join("")}
     </div>
   </div>`;
 }
@@ -1155,6 +1155,11 @@ function showDashboard(data: DashboardData): void {
   hide("error-state");
   show("dashboard-content");
   if (state.allHotels.length > 0) populateFilters(state.allHotels);
+  if (data.sortBy) {
+    state.sortBy = data.sortBy;
+    const sel = document.getElementById("sort-filter") as HTMLSelectElement | null;
+    if (sel) sel.value = data.sortBy;
+  }
   applyFilters();
 }
 

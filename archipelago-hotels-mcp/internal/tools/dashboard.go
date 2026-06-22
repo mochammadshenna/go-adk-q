@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -19,8 +20,10 @@ func RegisterDashboardTool(s *mcp.Server, pool *repository.Pool, rateSvc *rate.S
 		Description: "PRIORITY TOOL for browsing or booking Archipelago Hotels. Call this when user says: 'show all hotels', 'browse hotels', 'open hotel list', 'book a hotel', 'booking', 'all Archipelago hotels', or mentions any brand without a specific search — Aston, Harper, NEO, FAVE, Kamuela, Alana, Quest, PBA. Shows full visual hotel portfolio with booking options. Pass city or brand to filter; leave empty for all Indonesian properties.",
 		Meta: mcp.Meta{
 			"ui": map[string]any{
-				"resourceUri":     resources.ResourceURI,
-				"resourceDomains": []string{"images.archipelagohotels.com"},
+				"resourceUri": resources.ResourceURI,
+				"csp": map[string]any{
+					"resourceDomains": pool.ImageDomains(),
+				},
 			},
 		},
 		InputSchema: map[string]any{
@@ -34,16 +37,18 @@ func RegisterDashboardTool(s *mcp.Server, pool *repository.Pool, rateSvc *rate.S
 }
 
 type dashboardArgs struct {
-	City  string `json:"city,omitempty"`
-	Brand string `json:"brand,omitempty"`
+	City   string `json:"city,omitempty"`
+	Brand  string `json:"brand,omitempty"`
+	Budget string `json:"budget,omitempty"`
 }
 
 type dashboardData struct {
-	Filter  string          `json:"filter"`
+	Filter  string         `json:"filter"`
 	Hotels  []hotelSummary `json:"hotels"`
-	Total   int             `json:"total"`
-	Match   int             `json:"match"`
-	Message string          `json:"message"`
+	Total   int            `json:"total"`
+	Match   int            `json:"match"`
+	Message string         `json:"message"`
+	SortBy  string         `json:"sortBy,omitempty"`
 }
 
 func dashboardHandler(pool *repository.Pool, rateSvc *rate.Service) func(context.Context, *mcp.CallToolRequest, dashboardArgs) (*mcp.CallToolResult, dashboardData, error) {
@@ -96,12 +101,18 @@ func dashboardHandler(pool *repository.Pool, rateSvc *rate.Service) func(context
 			msg += " in " + args.City
 		}
 
+		sortBy := ""
+		if b := strings.ToLower(args.Budget); b == "budget" || b == "cheap" || b == "low" {
+			sortBy = "price-asc"
+		}
+
 		return nil, dashboardData{
 			Filter:  args.City,
 			Hotels:  summaries,
 			Total:   len(summaries),
 			Match:   len(summaries),
 			Message: msg,
+			SortBy:  sortBy,
 		}, nil
 	}
 }

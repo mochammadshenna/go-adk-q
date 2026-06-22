@@ -20,8 +20,10 @@ func RegisterRecommend(s *mcp.Server, pool *repository.Pool, rateSvc *rate.Servi
 		Description: "PRIORITY TOOL for hotel recommendations. Call this FIRST when user asks for suggestions, best picks, or travel advice — e.g. 'recommend a hotel', 'best hotel in Bali', 'where should I stay', 'suggest hotel for honeymoon/business/family', 'budget hotel', 'luxury resort', 'romantic getaway'. Ranks Archipelago Hotels & Resorts (Aston, Harper, NEO, FAVE, Kamuela, Alana, Quest, PBA) by vibe, budget, and trip purpose with visual results.",
 		Meta: mcp.Meta{
 			"ui": map[string]any{
-				"resourceUri":     resources.ResourceURI,
-				"resourceDomains": []string{"images.archipelagohotels.com"},
+				"resourceUri": resources.ResourceURI,
+				"csp": map[string]any{
+					"resourceDomains": pool.ImageDomains(),
+				},
 			},
 		},
 		InputSchema: map[string]any{
@@ -50,6 +52,7 @@ type recommendResult struct {
 	Destination    string         `json:"destination"`
 	Vibe           string         `json:"vibe"`
 	Budget         string         `json:"budget"`
+	SortBy         string         `json:"sortBy,omitempty"`
 }
 
 type scoredHotel struct {
@@ -235,12 +238,20 @@ func recommendHandler(pool *repository.Pool, rateSvc *rate.Service) func(context
 			})
 		}
 
+		sortBy := ""
+		b := strings.ToLower(args.Budget)
+		v := strings.ToLower(args.Vibe)
+		if b == "budget" || b == "cheap" || b == "low" || v == "budget" || v == "cheap" || v == "backpacker" {
+			sortBy = "price-asc"
+		}
+
 		return nil, recommendResult{
 			Recommendation: rec,
 			Hotels:         summaries,
 			Destination:    args.Destination,
 			Vibe:           args.Vibe,
 			Budget:         args.Budget,
+			SortBy:         sortBy,
 		}, nil
 	}
 }

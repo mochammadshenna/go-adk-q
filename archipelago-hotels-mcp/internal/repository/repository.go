@@ -107,12 +107,39 @@ type SearchParams struct {
 // Pool manages connections to the central database and per-brand databases.
 // Per-brand connections are lazily initialised on first use.
 type Pool struct {
-	central  *sql.DB
-	config   Config
-	brandDBs map[string]*sql.DB
-	brandCols map[string]map[string]map[string]bool // brandPrefix → table → column → true
-	brands   map[int]BrandRow
-	mu       sync.RWMutex
+	central          *sql.DB
+	config           Config
+	brandDBs         map[string]*sql.DB
+	brandCols        map[string]map[string]map[string]bool // brandPrefix → table → column → true
+	brands           map[int]BrandRow
+	thumbnailDomains []string // CDN hostnames discovered from thumbnail_desktop at startup
+	mu               sync.RWMutex
+}
+
+// SetThumbnailDomains stores CDN hostnames discovered from brand DB thumbnail URLs.
+func (p *Pool) SetThumbnailDomains(domains []string) {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	p.thumbnailDomains = domains
+	p.mu.Unlock()
+}
+
+// ImageDomains returns the combined list of image origins for the MCP iframe CSP.
+// Returns full https:// origins — bare hostnames are not valid CSP source directives.
+func (p *Pool) ImageDomains() []string {
+	if p == nil {
+		return []string{"https://images.archipelagohotels.com"}
+	}
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	out := make([]string, 0, 1+len(p.thumbnailDomains))
+	out = append(out, "https://images.archipelagohotels.com")
+	for _, d := range p.thumbnailDomains {
+		out = append(out, "https://"+d)
+	}
+	return out
 }
 
 // NewPool connects to the central database and caches brand metadata.
