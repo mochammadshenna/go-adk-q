@@ -55,17 +55,18 @@ func (s *Service) GetRates(ctx context.Context, dbPrefix string, apiHotelID int,
 		return nil, nil
 	}
 
-	key := cacheKey(dbPrefix, apiHotelID)
-
-	// Check cache first.
-	if cached, ok := s.cache.Get(key); ok {
-		return cached, nil
-	}
-
+	// Normalize dates before cache lookup so empty and explicit same-day calls share a slot.
 	if checkIn == "" || checkOut == "" {
 		now := s.timeNow()
 		checkIn = now.Format("2006-01-02")
 		checkOut = now.Add(24 * time.Hour).Format("2006-01-02")
+	}
+
+	key := cacheKey(dbPrefix, apiHotelID, checkIn, checkOut)
+
+	// Check cache first.
+	if cached, ok := s.cache.Get(key); ok {
+		return cached, nil
 	}
 
 	// 1. Try SimpleBooking live API.
@@ -75,7 +76,14 @@ func (s *Service) GetRates(ctx context.Context, dbPrefix string, apiHotelID int,
 		return rates, nil
 	}
 
-	// 2. Fallback: stored tb_hrooms.room_rate.
+	// 2. Try Sentec live API (hotel_channel = "SENTEC").
+	rates = s.trySentec(ctx, dbPrefix, apiHotelID, checkIn, checkOut)
+	if rates != nil {
+		s.cache.Set(key, rates)
+		return rates, nil
+	}
+
+	// 3. Fallback: stored tb_hrooms.room_rate.
 	rates = s.tryStored(ctx, dbPrefix, apiHotelID)
 	if rates != nil {
 		s.cache.Set(key, rates)
@@ -99,11 +107,14 @@ func (s *Service) trySB(ctx context.Context, dbPrefix string, apiHotelID int, ch
 		return nil
 	}
 
+	username, password := sbCredentials(creds)
+	slog.Debug("rate: sb credentials", "prefix", dbPrefix, "hotel_id", apiHotelID,
+		"source", map[bool]string{true: "simplebooking_user", false: "xml_user"}[creds.SimpleBookingUser != ""])
 	sbRates, sbErr := s.sb.GetRates(ctx, SBRequest{
 		StartDate: checkIn,
 		EndDate:   checkOut,
-		Username:  creds.SimpleBookingUser,
-		Password:  creds.SimpleBookingPass,
+		Username:  username,
+		Password:  password,
 		SBID:      creds.SimpleBookingID,
 	})
 	if sbErr != nil {
@@ -177,23 +188,100 @@ func (s *Service) tryStored(ctx context.Context, dbPrefix string, apiHotelID int
 	return result
 }
 
+// trySentec fetches live rates from the Sentec REST API.
+// Only fires when hotel_channel = "SENTEC" and xml_user/xml_pass + sentec_booking_id are set.
+func (s *Service) trySentec(ctx context.Context, dbPrefix string, apiHotelID int, checkIn, checkOut string) []RoomRate {
+	creds, err := s.pool.GetCredentials(ctx, dbPrefix, apiHotelID)
+	if err != nil {
+		slog.Warn("rate: sentec credentials fetch failed", "prefix", dbPrefix, "hotel_id", apiHotelID, "error", err)
+		return nil
+	}
+	if creds == nil || creds.HotelChannel != "SENTEC" {
+		return nil
+	}
+	if !creds.SentecBookingID.Valid || creds.SentecBookingID.String == "" {
+		slog.Debug("rate: sentec no property_id", "prefix", dbPrefix, "hotel_id", apiHotelID)
+		return nil
+	}
+
+	user, pass := s.pool.GetSentecCredentials(ctx, dbPrefix)
+	if user == "" {
+		user, pass = sentecCreds()
+	}
+	apiRates, apiErr := callSentecAPI(ctx, creds.SentecBookingID.String, checkIn, checkOut, user, pass)
+	if apiErr != nil {
+		slog.Warn("rate: sentec api failed", "prefix", dbPrefix, "hotel_id", apiHotelID, "error", apiErr)
+		return nil
+	}
+	if len(apiRates) == 0 {
+		return nil
+	}
+
+	// Enrich with room images from stored rooms matched by sentec_id.
+	storedRooms, _ := s.pool.GetRooms(ctx, dbPrefix, apiHotelID)
+	storedByID := make(map[int64]repository.RoomRow, len(storedRooms))
+	for _, sr := range storedRooms {
+		if sr.SentecID.Valid {
+			storedByID[sr.SentecID.Int64] = sr
+		}
+	}
+
+	slog.Info("rate: sentec live", "prefix", dbPrefix, "hotel_id", apiHotelID, "rooms", len(apiRates))
+	result := make([]RoomRate, 0, len(apiRates))
+	for _, r := range apiRates {
+		rr := RoomRate{
+			Name:         r.RoomName,
+			RatePerNight: r.FinalRate,
+			BaseRate:     r.BaseRate,
+			Source:       "sentec",
+		}
+		if id, parseErr := strconv.ParseInt(r.RoomID, 10, 64); parseErr == nil {
+			if stored, ok := storedByID[id]; ok {
+				if stored.RoomImage != "" {
+					rr.RoomImage = stored.RoomImage
+				}
+				if rr.Name == "" {
+					rr.Name = stored.Name
+				}
+			}
+		}
+		result = append(result, rr)
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
+// MinRateInfo holds the lowest rate and the corresponding base (rack) rate.
+type MinRateInfo struct {
+	Rate     float64
+	BaseRate float64
+}
+
 // MinRate returns the lowest rate from a list of room rates.
 // Returns 0 if the list is empty.
 func MinRate(rates []RoomRate) float64 {
-	var min float64
+	return MinRateWithBase(rates).Rate
+}
+
+// MinRateWithBase returns the lowest rate and its base rate from a list of room rates.
+func MinRateWithBase(rates []RoomRate) MinRateInfo {
+	var best MinRateInfo
 	for _, r := range rates {
-		if min == 0 || r.RatePerNight < min {
-			min = r.RatePerNight
+		if best.Rate == 0 || r.RatePerNight < best.Rate {
+			best.Rate = r.RatePerNight
+			best.BaseRate = r.BaseRate
 		}
 	}
-	return min
+	return best
 }
 
 // BatchMinRates fetches the minimum rate for each hotel in parallel.
 // Uses a bounded goroutine pool (maxWorkers) to avoid resource exhaustion.
-// Returns a map hotelID → minimum price (0 = not found).
+// Returns a map hotelID → MinRateInfo{Rate, BaseRate} (zero value = not found).
 // Context cancellation stops all pending goroutines.
-func (s *Service) BatchMinRates(ctx context.Context, hotels []repository.HotelRow) map[int]float64 {
+func (s *Service) BatchMinRates(ctx context.Context, hotels []repository.HotelRow) map[int]MinRateInfo {
 	if len(hotels) == 0 {
 		return nil
 	}
@@ -225,7 +313,7 @@ func (s *Service) BatchMinRates(ctx context.Context, hotels []repository.HotelRo
 
 	type result struct {
 		hotelID int
-		minRate float64
+		info    MinRateInfo
 	}
 
 	sem := make(chan struct{}, maxWorkers)
@@ -247,29 +335,27 @@ func (s *Service) BatchMinRates(ctx context.Context, hotels []repository.HotelRo
 
 			rates, err := s.GetRates(ctx, r.dbPrefix, r.apiID, "", "")
 			if err != nil || len(rates) == 0 {
-				// Fallback: use StartingPrice from central DB.
 				if r.startFrom > 0 {
-					results <- result{r.hotelID, r.startFrom}
+					results <- result{r.hotelID, MinRateInfo{Rate: r.startFrom}}
 				}
 				return
 			}
-			if m := MinRate(rates); m > 0 {
-				results <- result{r.hotelID, m}
+			if info := MinRateWithBase(rates); info.Rate > 0 {
+				results <- result{r.hotelID, info}
 			} else if r.startFrom > 0 {
-				results <- result{r.hotelID, r.startFrom}
+				results <- result{r.hotelID, MinRateInfo{Rate: r.startFrom}}
 			}
 		}(r)
 	}
 
-	// Close results channel when all goroutines finish.
 	go func() {
 		wg.Wait()
 		close(results)
 	}()
 
-	m := make(map[int]float64, len(reqs))
+	m := make(map[int]MinRateInfo, len(reqs))
 	for r := range results {
-		m[r.hotelID] = r.minRate
+		m[r.hotelID] = r.info
 	}
 	return m
 }
@@ -379,5 +465,18 @@ func (cb *circuitBreaker) Success() {
 }
 
 func credsHaveSB(c *repository.BrandCredentials) bool {
-	return c != nil && c.SimpleBookingID > 0 && c.SimpleBookingUser != "" && c.SimpleBookingPass != ""
+	if c == nil || c.SimpleBookingID == 0 {
+		return false
+	}
+	return (c.SimpleBookingUser != "" && c.SimpleBookingPass != "") ||
+		(c.XMLUser != "" && c.XMLPass != "")
+}
+
+// sbCredentials returns the username/password pair to use for the SB XML request.
+// Prefers simplebooking_user/pass; falls back to xml_user/xml_pass.
+func sbCredentials(c *repository.BrandCredentials) (username, password string) {
+	if c.SimpleBookingUser != "" {
+		return c.SimpleBookingUser, c.SimpleBookingPass
+	}
+	return c.XMLUser, c.XMLPass
 }

@@ -25,6 +25,7 @@ interface HotelSummary {
   rating: number;
   stars: number;
   priceFrom: number;
+  basePriceFrom?: number;
   currency: string;
   imageStyle: string;
   brandColor?: string;
@@ -61,6 +62,7 @@ interface HotelDetail {
   thumbnail?: string;
   roomTypes?: RoomType[];
   startingPrice?: number;
+  startingBasePrice?: number;
   bookingUrl?: string;
 }
 
@@ -715,6 +717,8 @@ const STYLES = `
   .room-price-row { display: flex; align-items: baseline; gap: 4px; }
   .room-price { font-size: 16px; font-weight: 800; letter-spacing: -0.02em; }
   .room-price-original { font-size: 12px; color: var(--text-3); text-decoration: line-through; text-decoration-color: #e53e3e; }
+  .price-from-original { font-size: 11px; color: var(--text-3); text-decoration: line-through; text-decoration-color: #e53e3e; line-height: 1.2; }
+  .starting-price-original { font-size: 13px; color: var(--text-3); text-decoration: line-through; text-decoration-color: #e53e3e; line-height: 1.3; }
   .room-price-night { font-size: 10px; color: var(--text-3); }
 
   .room-details { display: flex; align-items: center; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
@@ -1024,7 +1028,7 @@ function renderHotels(hotels: HotelSummary[]): void {
       <div class="card-footer">
         <div class="price-block">
           ${h.priceFrom > 0
-            ? `<span class="price-from">Start from</span><div class="price-row"><span class="price-val" style="color:${theme.accent}">${fmtPriceShort(h.priceFrom, h.currency)}</span><span class="price-night">/night</span></div>`
+            ? `<span class="price-from">Start from</span>${(h.basePriceFrom ?? 0) > h.priceFrom ? `<div class="price-from-original">${fmtPriceShort(h.basePriceFrom!, h.currency)}</div>` : ""}<div class="price-row"><span class="price-val" style="color:${theme.accent}">${fmtPriceShort(h.priceFrom, h.currency)}</span><span class="price-night">/night</span></div>`
             : `<span class="price-na">Rate not Available</span>`
           }
         </div>
@@ -1160,6 +1164,7 @@ function renderRoomDetail(detail: HotelDetail): string {
       <div class="starting-callout">
         <div class="starting-callout-left">
           <span class="starting-callout-label">Starting from</span>
+          ${(detail.startingBasePrice ?? 0) > (detail.startingPrice ?? 0) ? `<span class="starting-price-original">${fmtPriceFull(detail.startingBasePrice!, detail.currency)}</span>` : ""}
           ${(detail.startingPrice ?? 0) > 0 ? `<span class="starting-callout-price">${fmtPriceFull(detail.startingPrice!, detail.currency)}</span>` : ""}
         </div>
         ${bookingHref ? `<a href="${esc(bookingHref)}" class="book-now-btn">BOOK NOW</a>` : ""}

@@ -30,7 +30,9 @@ func RegisterDetail(s *mcp.Server, pool *repository.Pool, rateSvc *rate.Service)
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"hotelId": map[string]any{"type": "string", "description": "The hotel ID (e.g. aston-jakarta, harper-bali)."},
+				"hotelId":  map[string]any{"type": "string", "description": "The hotel ID (e.g. aston-jakarta, harper-bali)."},
+				"checkIn":  map[string]any{"type": "string", "description": "Check-in date YYYY-MM-DD. Defaults to today."},
+				"checkOut": map[string]any{"type": "string", "description": "Check-out date YYYY-MM-DD. Defaults to tomorrow."},
 			},
 			"required": []string{"hotelId"},
 		},
@@ -38,7 +40,9 @@ func RegisterDetail(s *mcp.Server, pool *repository.Pool, rateSvc *rate.Service)
 }
 
 type detailArgs struct {
-	HotelID string `json:"hotelId"`
+	HotelID  string `json:"hotelId"`
+	CheckIn  string `json:"checkIn,omitempty"`
+	CheckOut string `json:"checkOut,omitempty"`
 }
 
 func detailHandler(pool *repository.Pool, rateSvc *rate.Service) func(context.Context, *mcp.CallToolRequest, detailArgs) (*mcp.CallToolResult, map[string]any, error) {
@@ -87,7 +91,7 @@ func detailHandler(pool *repository.Pool, rateSvc *rate.Service) func(context.Co
 		}
 
 		if h.APIHotelID.Valid && h.DBPrefix != "" {
-			rates, rErr := rateSvc.GetRates(ctx, h.DBPrefix, int(h.APIHotelID.Int64), "", "")
+			rates, rErr := rateSvc.GetRates(ctx, h.DBPrefix, int(h.APIHotelID.Int64), args.CheckIn, args.CheckOut)
 			if rErr == nil && len(rates) > 0 {
 				roomTypes := make([]map[string]any, 0, len(rates))
 				for _, r := range rates {
@@ -102,8 +106,11 @@ func detailHandler(pool *repository.Pool, rateSvc *rate.Service) func(context.Co
 					})
 				}
 				detail["roomTypes"] = roomTypes
-				if m := rate.MinRate(rates); m > 0 {
-					detail["startingPrice"] = m
+				if info := rate.MinRateWithBase(rates); info.Rate > 0 {
+					detail["startingPrice"] = info.Rate
+					if info.BaseRate > info.Rate {
+						detail["startingBasePrice"] = info.BaseRate
+					}
 				}
 			}
 		}

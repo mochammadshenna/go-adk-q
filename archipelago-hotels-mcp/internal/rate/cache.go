@@ -26,9 +26,9 @@ func newRateCache(ttl time.Duration) *rateCache {
 	}
 }
 
-// cacheKey builds a unique key from dbPrefix and apiHotelID.
-func cacheKey(prefix string, hotelID int) string {
-	return prefix + ":" + itoa(hotelID)
+// cacheKey builds a unique key from dbPrefix, apiHotelID, and stay dates.
+func cacheKey(prefix string, hotelID int, checkIn, checkOut string) string {
+	return prefix + ":" + itoa(hotelID) + ":" + checkIn + ":" + checkOut
 }
 
 // Get returns cached rates if present and not expired.

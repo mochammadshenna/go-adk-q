@@ -116,6 +116,26 @@ func scanRoom(scanner interface{ Scan(dest ...any) error }) (RoomRow, error) {
 	return r, nil
 }
 
+// GetSentecCredentials fetches Sentec API credentials from the brand-level
+// credential_booking_engines table. Returns empty strings when the table is
+// absent (most brands) or has no active SENTEC row — callers fall back
+// to env vars / hardcoded globals.
+func (p *Pool) GetSentecCredentials(ctx context.Context, brandPrefix string) (username, password string) {
+	brandDB := p.BrandDB(ctx, brandPrefix)
+	if brandDB == nil {
+		return "", ""
+	}
+	var u, pw string
+	err := brandDB.QueryRowContext(ctx,
+		`SELECT username, password FROM credential_booking_engines WHERE code = 'SENTEC' AND status = 1 LIMIT 1`,
+	).Scan(&u, &pw)
+	if err != nil {
+		// ponytail: expected — table absent (MySQL 1146) or no active row
+		return "", ""
+	}
+	return u, pw
+}
+
 // GetCredentials fetches booking credentials for a hotel from its brand DB.
 func (p *Pool) GetCredentials(ctx context.Context, brandPrefix string, apiHotelID int) (*BrandCredentials, error) {
 	brandDB := p.BrandDB(ctx, brandPrefix)

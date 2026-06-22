@@ -100,8 +100,8 @@ func recommendHandler(pool *repository.Pool, rateSvc *rate.Service) func(context
 			var reasons []string
 
 			priceFrom := h.StartingPrice
-			if m, ok := rateMap[h.HotelID]; ok && m > 0 {
-				priceFrom = m
+			if info, ok := rateMap[h.HotelID]; ok && info.Rate > 0 {
+				priceFrom = info.Rate
 			}
 
 			switch budget {
@@ -218,23 +218,28 @@ func recommendHandler(pool *repository.Pool, rateSvc *rate.Service) func(context
 		summaries := make([]hotelSummary, 0, len(scored))
 		for _, sh := range scored {
 			pf := sh.h.StartingPrice
-			if m, ok := rateMap[sh.h.HotelID]; ok && m > 0 {
-				pf = m
+			var basePF float64
+			if info, ok := rateMap[sh.h.HotelID]; ok && info.Rate > 0 {
+				pf = info.Rate
+				if info.BaseRate > info.Rate {
+					basePF = info.BaseRate
+				}
 			}
 			summaries = append(summaries, hotelSummary{
-				ID:         fmt.Sprintf("%d", sh.h.HotelID),
-				Name:       sh.h.Name,
-				Brand:      sh.h.BrandName,
-				City:       sh.h.RegionName,
-				Country:    "Indonesia",
-				Rating:     sh.h.Rating,
-				Stars:      sh.h.Stars,
-				PriceFrom:  pf,
-				Currency:   sh.h.Currency,
-				ImageStyle: sh.h.ImageStyle,
-				BrandColor: sh.h.BrandColor,
-				Thumbnail:  thumbMap[sh.h.HotelID],
-				Tags:       deriveTags(sh.h),
+				ID:            fmt.Sprintf("%d", sh.h.HotelID),
+				Name:          sh.h.Name,
+				Brand:         sh.h.BrandName,
+				City:          sh.h.RegionName,
+				Country:       "Indonesia",
+				Rating:        sh.h.Rating,
+				Stars:         sh.h.Stars,
+				PriceFrom:     pf,
+				BasePriceFrom: basePF,
+				Currency:      sh.h.Currency,
+				ImageStyle:    sh.h.ImageStyle,
+				BrandColor:    sh.h.BrandColor,
+				Thumbnail:     thumbMap[sh.h.HotelID],
+				Tags:          deriveTags(sh.h),
 			})
 		}
 

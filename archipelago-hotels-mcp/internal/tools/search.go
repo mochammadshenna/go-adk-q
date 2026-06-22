@@ -61,8 +61,9 @@ type hotelSummary struct {
 	Country    string   `json:"country"`
 	Rating     float64  `json:"rating"`
 	Stars      int      `json:"stars"`
-	PriceFrom  float64  `json:"priceFrom"`
-	Currency   string   `json:"currency"`
+	PriceFrom     float64  `json:"priceFrom"`
+	BasePriceFrom float64  `json:"basePriceFrom,omitempty"`
+	Currency      string   `json:"currency"`
 	ImageStyle string   `json:"imageStyle"`
 	BrandColor string   `json:"brandColor,omitempty"`
 	Thumbnail  string   `json:"thumbnail,omitempty"`
@@ -101,24 +102,29 @@ func searchHandler(pool *repository.Pool, rateSvc *rate.Service) func(context.Co
 		summaries := make([]hotelSummary, 0, len(hotels))
 		for _, h := range hotels {
 			priceFrom := h.StartingPrice
-			if m, ok := rateMap[h.HotelID]; ok && m > 0 {
-				priceFrom = m
+			var basePriceFrom float64
+			if info, ok := rateMap[h.HotelID]; ok && info.Rate > 0 {
+				priceFrom = info.Rate
+				if info.BaseRate > info.Rate {
+					basePriceFrom = info.BaseRate
+				}
 			}
 
 			summaries = append(summaries, hotelSummary{
-				ID:         fmt.Sprintf("%d", h.HotelID),
-				Name:       h.Name,
-				Brand:      h.BrandName,
-				City:       h.RegionName,
-				Country:    country,
-				Rating:     h.Rating,
-				Stars:      h.Stars,
-				PriceFrom:  priceFrom,
-				Currency:   h.Currency,
-				ImageStyle: h.ImageStyle,
-				BrandColor: h.BrandColor,
-				Thumbnail:  thumbMap[h.HotelID],
-				Tags:       deriveTags(h),
+				ID:            fmt.Sprintf("%d", h.HotelID),
+				Name:          h.Name,
+				Brand:         h.BrandName,
+				City:          h.RegionName,
+				Country:       country,
+				Rating:        h.Rating,
+				Stars:         h.Stars,
+				PriceFrom:     priceFrom,
+				BasePriceFrom: basePriceFrom,
+				Currency:      h.Currency,
+				ImageStyle:    h.ImageStyle,
+				BrandColor:    h.BrandColor,
+				Thumbnail:     thumbMap[h.HotelID],
+				Tags:          deriveTags(h),
 			})
 		}
 
