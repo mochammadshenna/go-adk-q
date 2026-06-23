@@ -9,7 +9,7 @@ System context document for AI agents and engineers working on this codebase.
 This is an MCP (Model Context Protocol) server written in Go that gives Claude Desktop hotel search, recommendation, and browsing capabilities across the full Archipelago Hotels & Resorts portfolio.
 
 **Operator**: Archipelago Hotels & Resorts  
-**Software platform**: Sentec (trademark of Sentinel Tech) — PMS, Booking Engine, EMS  
+**Software platform**: Sentec — PMS, Booking Engine, EMS  
 **Module path**: `github.com/msw/archipelago-hotels-mcp`
 
 ### 13 Supported Brands
@@ -39,7 +39,7 @@ This is an MCP (Model Context Protocol) server written in Go that gives Claude D
 C4Context
     title Archipelago Hotels MCP Server — System Context
 
-    Person(dev, "Sentec Tech Developer", "Builds and operates the MCP server")
+    Person(dev, "Public Website Team Developer", "Builds and operates the MCP server")
     Person(staff, "Archipelago Hotels Staff", "Uses Claude Desktop for hotel queries")
 
     System_Boundary(mcp, "archipelago-hotels-mcp") {
@@ -50,10 +50,10 @@ C4Context
     System_Ext(mysql_central, "MySQL: db_archipelagowebsite", "Central hotel catalog: brands, regions, 279+ hotels with starting prices.")
     System_Ext(mysql_brand, "MySQL: db_{prefix}website (×8)", "Per-brand databases: room types, rates, thumbnail URLs, booking credentials. Lazy-connected.")
     System_Ext(sb, "SimpleBooking XML API", "Live rate provider. OTA_HotelAvailRQ over HTTPS. 5-min TTL cache; circuit breaker on failure.")
-    System_Ext(sentec_api, "Sentec Booking API", "Reserved rate provider (api.booking.sentec.io). Not used — zero hotels have Sentec credentials today.")
+    System_Ext(sentec_api, "Sentec Booking API", "Live rate provider (api.booking.sentec.io). Active for hotels with hotel_channel = 'SENTEC'.")
     System_Ext(cdn, "Archipelago Image CDN", "images.archipelagohotels.com — CDN proxy rewrites S3/brand URLs for CSP-safe thumbnail delivery.")
-    System_Ext(pms, "Sentec PMS", "Property Management System. Source of truth for hotel inventory. Not directly queried by this server.")
-    System_Ext(booking_engine, "Sentec Booking Engine", "Handles actual reservations. This server exposes search only; booking is out of scope.")
+    System_Ext(pms, "PMS", "Property Management System. Source of truth for hotel inventory. Not directly queried by this server.")
+    System_Ext(booking_engine, "Booking Engine", "Handles actual reservations. This server exposes search only; booking is out of scope.")
 
     Rel(staff, claude, "Natural language hotel queries", "e.g. Find me a hotel in Bali")
     Rel(dev, server, "Builds, configures, and deploys")
@@ -61,7 +61,7 @@ C4Context
     Rel(server, mysql_central, "Hotel catalog queries", "MySQL/TCP — same network required")
     Rel(server, mysql_brand, "Room rates and thumbnails", "MySQL/TCP — lazy connect per brand")
     Rel(server, sb, "Live rate requests", "HTTPS XML (OTA_HotelAvailRQ)")
-    Rel(server, sentec_api, "Rate requests (future)", "HTTPS REST — not yet active")
+    Rel(server, sentec_api, "Rate requests", "HTTPS REST — active for SENTEC channel hotels")
     Rel(server, cdn, "Thumbnail URL rewrite only", "No HTTP fetch — URL transform in-process")
     Rel(server, booking_engine, "n/a — read-only boundary", "Booking credentials fetched but not used")
     Rel(pms, mysql_brand, "Writes hotel and room data", "Upstream source")
@@ -92,7 +92,7 @@ flowchart TD
         CENTRAL["MySQL: db_archipelagowebsite\n(central catalog)"]
         BRAND["MySQL: db_{prefix}website\n(per-brand room data)"]
         SB["SimpleBooking XML API\nhttps://xml.simplebooking.it/\nxmlservice.asmx/HotelAvailRQ"]
-        SENTEC["Sentec REST API\n(reserved, no active hotels)"]
+        SENTEC["Sentec REST API\n(active; hotel_channel = 'SENTEC')"]
         CDN["Brand CDN\nimages.archipelagohotels.com"]
     end
 
@@ -106,7 +106,7 @@ flowchart TD
     REPO --> CENTRAL
     REPO --> BRAND
     REPO --> CDN
-    SENTEC -. "future" .-> RATE
+    SENTEC --> RATE
 ```
 
 ---

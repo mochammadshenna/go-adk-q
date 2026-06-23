@@ -1,6 +1,6 @@
 # archipelago-hotels-mcp — Claude Code Instructions
 
-Go MCP server for Archipelago Hotels & Resorts (Sentec Tech product). Exposes hotel search, recommendation, and booking tools to Claude Desktop and MCP-compatible clients.
+Go MCP server for Archipelago Hotels & Resorts. Exposes hotel search, recommendation, and booking tools to Claude Desktop and MCP-compatible clients.
 
 ## Build
 

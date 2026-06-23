@@ -476,4 +476,4 @@ once the cooldown expires.
 | Rate service configuration (SB credentials) | `internal/repository/room.go` — `GetCredentials` |
 | go-sdk MCP documentation | [github.com/modelcontextprotocol/go-sdk](https://github.com/modelcontextprotocol/go-sdk) |
 | Archipelago Hotels brand guide | Internal wiki |
-| Sentec PMS integration | Reserved — `internal/rate/sentec.go` |
+| Sentec API integration | Active — `internal/rate/sentec.go` |

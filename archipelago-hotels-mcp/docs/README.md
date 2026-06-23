@@ -230,9 +230,6 @@ See [`docs/adr/`](./adr/) for the full decision log. Summary:
 
 <div align="center">
 
-**archipelago-hotels-mcp** is a [Sentec Tech](https://sentectech.com) product  
-built for [Archipelago Hotels & Resorts](https://archipelagohotels.com)
-
-*Sentec™ is a registered trademark of Sentinel Tech.*
+**archipelago-hotels-mcp** is built for [Archipelago Hotels & Resorts](https://archipelagohotels.com)
 
 </div>

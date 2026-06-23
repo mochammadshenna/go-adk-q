@@ -1,13 +1,13 @@
 # PRODUCT.md — Archipelago Hotels MCP Server
 
-> Sentec Tech product. Bridges Sentec MySQL data with Claude AI for natural language hotel discovery across all Archipelago Hotels & Resorts brands.
+> Bridges hotel MySQL data with Claude AI for natural language hotel discovery across all Archipelago Hotels & Resorts brands.
 
 ---
 
 ## Project Overview
 
 **Project**: archipelago-hotels-mcp
-**Owner**: Sentec Tech (hospitality software division)
+**Owner**: Public Website Team
 **Operator**: Archipelago Hotels & Resorts
 **Primary Interface**: Claude Desktop (stdio MCP)
 
@@ -26,9 +26,8 @@ Enable natural language hotel discovery across all Archipelago Hotels & Resorts 
 | Entity | Role |
 |--------|------|
 | **Archipelago Hotels & Resorts** | Hotel management company. Operates the hotel portfolio. |
-| **Sentec Tech** | Hospitality software company. Owns trademark "Sentec". Builds Sentec PMS, Sentec Booking Engine, Sentec EMS, and this MCP server. |
 
-This server connects Sentec's MySQL hotel catalog and per-brand room databases to Claude's tool-calling infrastructure. It is a read-only integration — no booking transactions are initiated through this server.
+This server connects the MySQL hotel catalog and per-brand room databases to Claude's tool-calling infrastructure. It is a read-only integration — no booking transactions are initiated through this server.
 
 ---
 
@@ -38,7 +37,7 @@ This server connects Sentec's MySQL hotel catalog and per-brand room databases t
 
 Archipelago staff using Claude Desktop for hotel portfolio lookups, competitive analysis, and guest-facing research support.
 
-### Technical — Sentec Tech Developers
+### Technical — Public Website Team Developers
 
 Developers building AI-assisted hospitality workflows who integrate hotel search and recommendation capabilities into Claude-based pipelines.
 
@@ -167,7 +166,7 @@ Brand-specific `imageStyle` gradients are defined in `internal/repository/reposi
 | `internal/rate/rate.go` | Service, BatchMinRates, circuitBreaker, SBClient |
 | `internal/rate/cache.go` | rateCache (TTL, lazy expiry, no goroutine) |
 | `internal/rate/simplebooking.go` | XML builder + parser for SB API |
-| `internal/rate/sentec.go` | Sentec REST client (reserved, 0 hotels use it) |
+| `internal/rate/sentec.go` | Sentec REST client (active; `hotel_channel = 'SENTEC'`) |
 | `internal/tools/search.go` | search_hotels handler |
 | `internal/tools/recommend.go` | recommend_hotel handler |
 | `internal/tools/dashboard.go` | find_hotels handler |
@@ -218,7 +217,7 @@ Brand-specific `imageStyle` gradients are defined in `internal/repository/reposi
 
 | Phase | Item | Status |
 |-------|------|--------|
-| Phase 3 | Sentec API integration (`internal/rate/sentec.go` reserved) | Planned |
+| Phase 3 | Sentec API integration (`internal/rate/sentec.go`) | Active |
 | Phase 5 | Caching improvements | Planned |
 | Future | Non-Indonesian hotel support (USD, VND, PHP currencies) | Backlog |
 | Future | Booking transaction capability | Not in scope (requires separate authorization) |

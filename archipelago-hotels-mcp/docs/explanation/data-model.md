@@ -361,7 +361,7 @@ The default when the column is NULL is `'IDR'` (applied via `COALESCE` in all ho
 
 ## Thumbnail Field
 
-`thumbnail_desktop` in the brand DB's `tb_hotels` stores a CDN URL pointing to an image hosted on Sentinel Tech's asset infrastructure. The URL is transformed before being returned to clients:
+`thumbnail_desktop` in the brand DB's `tb_hotels` stores a CDN URL pointing to an image hosted on brand asset infrastructure. The URL is transformed before being returned to clients:
 
 **Raw CDN URL example:**
 ```

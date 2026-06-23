@@ -2,7 +2,7 @@
 
 - **Status**: Accepted
 - **Date**: 2025-06
-- **Deciders**: Sentinel Tech Platform Team
+- **Deciders**: Public Website Team
 
 ---
 

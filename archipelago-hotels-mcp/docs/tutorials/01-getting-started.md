@@ -62,7 +62,7 @@ archipelago-hotels-mcp/
 │       └── main.go          # Binary entry point; parses stdio|http subcommand
 ├── internal/
 │   ├── repository/          # MySQL pool, hotel/room queries, ConfigFromEnv()
-│   ├── rate/                # Live rate fetching (Sentec PMS, SimpleBooking fallback)
+│   ├── rate/                # Live rate fetching (Sentec API, SimpleBooking fallback)
 │   ├── resources/           # Embedded MCP App HTML (written here by build-ui)
 │   │   └── mcp-app.html     # Generated — do not edit by hand
 │   ├── server/              # MCP server wiring (stdio and HTTP transports)

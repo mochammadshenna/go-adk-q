@@ -1,25 +1,31 @@
 <title>Archipelago Hotels MCP — Documentation Suite</title>
 <style>
   :root {
-    --ground:    #0d1b2a;
-    --surface:   #132236;
+    --ground: #0d1b2a;
+    --surface: #132236;
     --surface-2: #1a2e47;
-    --border:    #243d5c;
-    --text:      #e8edf2;
-    --text-dim:  #8eabc4;
-    --accent:    #c8922a;
-    --accent-2:  #2e6da4;
-    --accent-glow: rgba(200,146,42,0.15);
-    --green:     #4caf7d;
-    --mono: 'ui-monospace','Cascadia Code','Menlo','Consolas',monospace;
+    --border: #243d5c;
+    --text: #e8edf2;
+    --text-dim: #8eabc4;
+    --accent: #c8922a;
+    --accent-2: #2e6da4;
+    --accent-glow: rgba(200, 146, 42, 0.15);
+    --green: #4caf7d;
+    --mono: 'ui-monospace', 'Cascadia Code', 'Menlo', 'Consolas', monospace;
   }
 
-  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
 
   body {
     background: var(--ground);
     color: var(--text);
-    font-family: 'system-ui','Segoe UI','Helvetica Neue',sans-serif;
+    font-family: 'system-ui', 'Segoe UI', 'Helvetica Neue', sans-serif;
     font-size: 15px;
     line-height: 1.6;
     min-height: 100vh;
@@ -39,8 +45,8 @@
     position: absolute;
     inset: 0;
     background:
-      radial-gradient(ellipse 600px 300px at 80% 50%, rgba(46,109,164,0.12) 0%, transparent 70%),
-      radial-gradient(ellipse 300px 200px at 20% 80%, rgba(200,146,42,0.06) 0%, transparent 60%);
+      radial-gradient(ellipse 600px 300px at 80% 50%, rgba(46, 109, 164, 0.12) 0%, transparent 70%),
+      radial-gradient(ellipse 300px 200px at 20% 80%, rgba(200, 146, 42, 0.06) 0%, transparent 60%);
     pointer-events: none;
   }
 
@@ -81,7 +87,9 @@
     margin-bottom: 10px;
   }
 
-  .header h1 span { color: var(--accent); }
+  .header h1 span {
+    color: var(--accent);
+  }
 
   .header-sub {
     color: var(--text-dim);
@@ -91,7 +99,11 @@
     line-height: 1.55;
   }
 
-  .badge-row { display: flex; flex-wrap: wrap; gap: 8px; }
+  .badge-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
 
   .badge {
     display: inline-flex;
@@ -108,16 +120,26 @@
     transition: border-color 0.2s, color 0.2s;
   }
 
-  .badge:hover { border-color: var(--accent-2); color: var(--text); }
+  .badge:hover {
+    border-color: var(--accent-2);
+    color: var(--text);
+  }
 
   .badge .dot {
-    width: 6px; height: 6px;
+    width: 6px;
+    height: 6px;
     border-radius: 50%;
     background: var(--accent);
     flex-shrink: 0;
   }
-  .badge .dot.blue  { background: var(--accent-2); }
-  .badge .dot.green { background: var(--green); }
+
+  .badge .dot.blue {
+    background: var(--accent-2);
+  }
+
+  .badge .dot.green {
+    background: var(--green);
+  }
 
   /* ── LAYOUT ──────────────────────────────────────────── */
   .page {
@@ -127,11 +149,18 @@
   }
 
   @media (max-width: 700px) {
-    .header { padding: 36px 24px 32px; }
-    .page   { padding: 0 24px 60px; }
+    .header {
+      padding: 36px 24px 32px;
+    }
+
+    .page {
+      padding: 0 24px 60px;
+    }
   }
 
-  section { margin-top: 52px; }
+  section {
+    margin-top: 52px;
+  }
 
   .section-label {
     font-family: var(--mono);
@@ -199,12 +228,41 @@
     transform: rotate(180deg);
   }
 
-  .al-band.transport { background: rgba(200,146,42,0.10); color: var(--accent);  border-right: 1px solid rgba(200,146,42,0.2); }
-  .al-band.server    { background: rgba(46,109,164,0.12);  color: #7fbdea;        border-right: 1px solid rgba(46,109,164,0.25); }
-  .al-band.tools     { background: rgba(46,109,164,0.08);  color: #7fbdea;        border-right: 1px solid rgba(46,109,164,0.2); }
-  .al-band.data      { background: rgba(76,175,125,0.08);  color: var(--green);   border-right: 1px solid rgba(76,175,125,0.2); }
-  .al-band.rate      { background: rgba(180,90,180,0.08);  color: #c078c0;        border-right: 1px solid rgba(180,90,180,0.2); }
-  .al-band.ui        { background: rgba(200,146,42,0.06);  color: var(--accent);  border-right: 1px solid rgba(200,146,42,0.15); }
+  .al-band.transport {
+    background: rgba(200, 146, 42, 0.10);
+    color: var(--accent);
+    border-right: 1px solid rgba(200, 146, 42, 0.2);
+  }
+
+  .al-band.server {
+    background: rgba(46, 109, 164, 0.12);
+    color: #7fbdea;
+    border-right: 1px solid rgba(46, 109, 164, 0.25);
+  }
+
+  .al-band.tools {
+    background: rgba(46, 109, 164, 0.08);
+    color: #7fbdea;
+    border-right: 1px solid rgba(46, 109, 164, 0.2);
+  }
+
+  .al-band.data {
+    background: rgba(76, 175, 125, 0.08);
+    color: var(--green);
+    border-right: 1px solid rgba(76, 175, 125, 0.2);
+  }
+
+  .al-band.rate {
+    background: rgba(180, 90, 180, 0.08);
+    color: #c078c0;
+    border-right: 1px solid rgba(180, 90, 180, 0.2);
+  }
+
+  .al-band.ui {
+    background: rgba(200, 146, 42, 0.06);
+    color: var(--accent);
+    border-right: 1px solid rgba(200, 146, 42, 0.15);
+  }
 
   /* Content area: flex-wrap boxes */
   .al-content {
@@ -245,33 +303,45 @@
     background: var(--accent-glow);
     color: var(--accent);
   }
-  .al-box.origin .al-sub { color: rgba(200,146,42,0.7); }
+
+  .al-box.origin .al-sub {
+    color: rgba(200, 146, 42, 0.7);
+  }
 
   .al-box.server-box {
     border-color: var(--accent-2);
-    background: rgba(46,109,164,0.12);
+    background: rgba(46, 109, 164, 0.12);
     color: #b8d6f0;
   }
-  .al-box.server-box .al-sub { color: rgba(127,189,234,0.65); }
+
+  .al-box.server-box .al-sub {
+    color: rgba(127, 189, 234, 0.65);
+  }
 
   .al-box.app-only {
     border-color: var(--green);
-    background: rgba(76,175,125,0.08);
+    background: rgba(76, 175, 125, 0.08);
     color: var(--green);
   }
-  .al-box.app-only .al-sub { color: rgba(76,175,125,0.65); }
+
+  .al-box.app-only .al-sub {
+    color: rgba(76, 175, 125, 0.65);
+  }
 
   .al-box.data-box {
-    border-color: rgba(76,175,125,0.35);
-    background: rgba(76,175,125,0.05);
+    border-color: rgba(76, 175, 125, 0.35);
+    background: rgba(76, 175, 125, 0.05);
   }
 
   .al-box.rate-live {
     border-color: #c078c0;
-    background: rgba(180,90,180,0.06);
+    background: rgba(180, 90, 180, 0.06);
     color: #d8a0d8;
   }
-  .al-box.rate-live .al-sub { color: rgba(192,120,192,0.65); }
+
+  .al-box.rate-live .al-sub {
+    color: rgba(192, 120, 192, 0.65);
+  }
 
   /* Inline separators between boxes */
   .al-sep {
@@ -284,14 +354,18 @@
     align-self: center;
   }
 
-  .al-sep.arrow { color: var(--accent-2); font-size: 16px; }
+  .al-sep.arrow {
+    color: var(--accent-2);
+    font-size: 16px;
+  }
 
   /* Down-arrow connector between rows */
   .al-connector {
     display: flex;
     align-items: center;
     height: 20px;
-    padding-left: 44px; /* center under band */
+    padding-left: 44px;
+    /* center under band */
     position: relative;
   }
 
@@ -299,7 +373,8 @@
     content: '';
     position: absolute;
     left: 44px;
-    top: 0; bottom: 0;
+    top: 0;
+    bottom: 0;
     width: 1px;
     background: var(--border);
   }
@@ -309,7 +384,8 @@
     position: absolute;
     left: 37px;
     bottom: 0;
-    width: 0; height: 0;
+    width: 0;
+    height: 0;
     border-left: 7px solid transparent;
     border-right: 7px solid transparent;
     border-top: 8px solid var(--border);
@@ -322,7 +398,11 @@
     gap: 16px;
   }
 
-  @media (max-width: 640px) { .quad-grid { grid-template-columns: 1fr; } }
+  @media (max-width: 640px) {
+    .quad-grid {
+      grid-template-columns: 1fr;
+    }
+  }
 
   .quad-card {
     background: var(--surface);
@@ -332,7 +412,9 @@
     transition: border-color 0.2s;
   }
 
-  .quad-card:hover { border-color: var(--accent-2); }
+  .quad-card:hover {
+    border-color: var(--accent-2);
+  }
 
   .quad-header {
     display: flex;
@@ -342,22 +424,50 @@
   }
 
   .quad-icon {
-    width: 32px; height: 32px;
+    width: 32px;
+    height: 32px;
     border-radius: 6px;
-    display: flex; align-items: center; justify-content: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     font-size: 15px;
     flex-shrink: 0;
   }
 
-  .quad-icon.tutorial  { background: rgba(200,146,42,0.15); }
-  .quad-icon.howto     { background: rgba(46,109,164,0.18); }
-  .quad-icon.reference { background: rgba(76,175,125,0.12); }
-  .quad-icon.explain   { background: rgba(180,90,180,0.12); }
+  .quad-icon.tutorial {
+    background: rgba(200, 146, 42, 0.15);
+  }
 
-  .quad-title   { font-size: 13px; font-weight: 600; color: var(--text); }
-  .quad-subtitle { font-size: 11px; color: var(--text-dim); margin-top: 1px; }
+  .quad-icon.howto {
+    background: rgba(46, 109, 164, 0.18);
+  }
 
-  .doc-list { list-style: none; display: flex; flex-direction: column; gap: 5px; }
+  .quad-icon.reference {
+    background: rgba(76, 175, 125, 0.12);
+  }
+
+  .quad-icon.explain {
+    background: rgba(180, 90, 180, 0.12);
+  }
+
+  .quad-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  .quad-subtitle {
+    font-size: 11px;
+    color: var(--text-dim);
+    margin-top: 1px;
+  }
+
+  .doc-list {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
 
   .doc-list li {
     display: flex;
@@ -366,16 +476,36 @@
     font-size: 13px;
     color: var(--text-dim);
     padding: 4px 0;
-    border-bottom: 1px solid rgba(36,61,92,0.5);
+    border-bottom: 1px solid rgba(36, 61, 92, 0.5);
   }
 
-  .doc-list li:last-child { border-bottom: none; }
-  .doc-list li::before { content: '›'; color: var(--accent); font-size: 12px; flex-shrink: 0; }
-  .doc-name { font-family: var(--mono); font-size: 12px; color: var(--text); }
+  .doc-list li:last-child {
+    border-bottom: none;
+  }
+
+  .doc-list li::before {
+    content: '›';
+    color: var(--accent);
+    font-size: 12px;
+    flex-shrink: 0;
+  }
+
+  .doc-name {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--text);
+  }
 
   /* ── TABLES ─────────────────────────────────────────── */
-  .table-wrap { overflow-x: auto; }
-  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .table-wrap {
+    overflow-x: auto;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
 
   thead th {
     font-family: var(--mono);
@@ -389,13 +519,35 @@
     white-space: nowrap;
   }
 
-  tbody tr { border-bottom: 1px solid rgba(36,61,92,0.5); transition: background 0.15s; }
-  tbody tr:last-child { border-bottom: none; }
-  tbody tr:hover { background: var(--surface-2); }
+  tbody tr {
+    border-bottom: 1px solid rgba(36, 61, 92, 0.5);
+    transition: background 0.15s;
+  }
 
-  td { padding: 11px 14px; color: var(--text-dim); vertical-align: top; }
-  td.mono   { font-family: var(--mono); font-size: 12px; color: var(--text); }
-  td.strong { color: var(--text); font-weight: 500; }
+  tbody tr:last-child {
+    border-bottom: none;
+  }
+
+  tbody tr:hover {
+    background: var(--surface-2);
+  }
+
+  td {
+    padding: 11px 14px;
+    color: var(--text-dim);
+    vertical-align: top;
+  }
+
+  td.mono {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--text);
+  }
+
+  td.strong {
+    color: var(--text);
+    font-weight: 500;
+  }
 
   .status-badge {
     display: inline-block;
@@ -408,9 +560,9 @@
   }
 
   .status-badge.accepted {
-    background: rgba(76,175,125,0.15);
+    background: rgba(76, 175, 125, 0.15);
     color: var(--green);
-    border: 1px solid rgba(76,175,125,0.3);
+    border: 1px solid rgba(76, 175, 125, 0.3);
   }
 
   .vis-badge {
@@ -422,15 +574,15 @@
   }
 
   .vis-badge.public {
-    background: rgba(46,109,164,0.18);
+    background: rgba(46, 109, 164, 0.18);
     color: #7fbdea;
-    border: 1px solid rgba(46,109,164,0.3);
+    border: 1px solid rgba(46, 109, 164, 0.3);
   }
 
   .vis-badge.app-only {
-    background: rgba(76,175,125,0.12);
+    background: rgba(76, 175, 125, 0.12);
     color: var(--green);
-    border: 1px solid rgba(76,175,125,0.25);
+    border: 1px solid rgba(76, 175, 125, 0.25);
   }
 
   /* ── KEY FILES GRID ─────────────────────────────────── */
@@ -448,11 +600,29 @@
     transition: border-color 0.2s, background 0.2s;
   }
 
-  .file-card:hover { border-color: var(--accent); background: var(--surface-2); }
-  .file-card:hover .file-name { color: var(--accent); }
+  .file-card:hover {
+    border-color: var(--accent);
+    background: var(--surface-2);
+  }
 
-  .file-name { font-family: var(--mono); font-size: 12.5px; color: var(--text); font-weight: 600; margin-bottom: 6px; transition: color 0.2s; }
-  .file-desc { font-size: 12px; color: var(--text-dim); line-height: 1.45; }
+  .file-card:hover .file-name {
+    color: var(--accent);
+  }
+
+  .file-name {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    color: var(--text);
+    font-weight: 600;
+    margin-bottom: 6px;
+    transition: color 0.2s;
+  }
+
+  .file-desc {
+    font-size: 12px;
+    color: var(--text-dim);
+    line-height: 1.45;
+  }
 
   .file-type {
     display: inline-block;
@@ -463,15 +633,23 @@
     text-transform: uppercase;
     padding: 2px 6px;
     border-radius: 2px;
-    background: rgba(36,61,92,0.8);
+    background: rgba(36, 61, 92, 0.8);
     color: var(--accent-2);
   }
 
   /* ── ENV TABLE ──────────────────────────────────────── */
-  .env-default { font-family: var(--mono); font-size: 11.5px; color: var(--accent-2); }
+  .env-default {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--accent-2);
+  }
 
   /* ── BUILD COMMANDS ─────────────────────────────────── */
-  .cmd-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px; }
+  .cmd-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 10px;
+  }
 
   .cmd-card {
     background: var(--ground);
@@ -483,11 +661,24 @@
     gap: 5px;
   }
 
-  .cmd-line { font-family: var(--mono); font-size: 13px; color: var(--accent); }
-  .cmd-desc { font-size: 12px; color: var(--text-dim); }
+  .cmd-line {
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--accent);
+  }
+
+  .cmd-desc {
+    font-size: 12px;
+    color: var(--text-dim);
+  }
 
   /* ── RATE CHAIN ─────────────────────────────────────── */
-  .chain-row { display: flex; align-items: stretch; flex-wrap: wrap; gap: 0; }
+  .chain-row {
+    display: flex;
+    align-items: stretch;
+    flex-wrap: wrap;
+    gap: 0;
+  }
 
   .chain-step {
     background: var(--surface);
@@ -498,10 +689,36 @@
     min-width: 160px;
   }
 
-  .chain-arrow { display: flex; align-items: center; padding: 0 6px; color: var(--border); font-size: 18px; flex-shrink: 0; align-self: center; }
-  .chain-pri  { font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.15em; color: var(--accent); text-transform: uppercase; margin-bottom: 4px; }
-  .chain-name { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 3px; }
-  .chain-detail { font-size: 11.5px; color: var(--text-dim); }
+  .chain-arrow {
+    display: flex;
+    align-items: center;
+    padding: 0 6px;
+    color: var(--border);
+    font-size: 18px;
+    flex-shrink: 0;
+    align-self: center;
+  }
+
+  .chain-pri {
+    font-family: var(--mono);
+    font-size: 9.5px;
+    letter-spacing: 0.15em;
+    color: var(--accent);
+    text-transform: uppercase;
+    margin-bottom: 4px;
+  }
+
+  .chain-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: 3px;
+  }
+
+  .chain-detail {
+    font-size: 11.5px;
+    color: var(--text-dim);
+  }
 
   /* ── FOOTER ─────────────────────────────────────────── */
   .footer {
@@ -515,8 +732,17 @@
     gap: 12px;
   }
 
-  .footer-left  { font-family: var(--mono); font-size: 11px; color: var(--border); letter-spacing: 0.08em; }
-  .footer-right { font-size: 11.5px; color: var(--text-dim); }
+  .footer-left {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--border);
+    letter-spacing: 0.08em;
+  }
+
+  .footer-right {
+    font-size: 11.5px;
+    color: var(--text-dim);
+  }
 </style>
 
 <!-- ══════════════════════════════════════════════════════
@@ -524,7 +750,7 @@
 ═══════════════════════════════════════════════════════ -->
 <header class="header">
   <div class="header-inner">
-    <div class="eyebrow">Sentinel Tech · Sentec PMS · MCP Server</div>
+    <div class="eyebrow">Archipelago Hotels · MCP Server</div>
     <h1>Archipelago Hotels <span>MCP</span><br>Documentation Suite</h1>
     <p class="header-sub">
       Complete reference for the Go MCP server exposing Archipelago Hotels &amp; Resorts
@@ -623,7 +849,8 @@
               Pool.brandDBs[ ]
               <span class="al-sub">8 brands · lazy connect · INFORMATION_SCHEMA schema introspect</span>
             </div>
-            <span class="al-sep" style="font-size:11px;color:var(--text-dim);white-space:nowrap">aston · neo · fave · alana · harper · kamuela · quest · pba</span>
+            <span class="al-sep" style="font-size:11px;color:var(--text-dim);white-space:nowrap">aston · neo · fave ·
+              alana · harper · kamuela · quest · pba</span>
           </div>
         </div>
 
@@ -687,19 +914,22 @@
       <div class="chain-step">
         <div class="chain-pri">Priority 1 — live</div>
         <div class="chain-name">SimpleBooking XML</div>
-        <div class="chain-detail">OTA_HotelAvailRQ · TotalAfterTax · 5-worker pool · circuit breaker (5 fail → 120 s cooldown) · 5-min cache TTL</div>
+        <div class="chain-detail">OTA_HotelAvailRQ · TotalAfterTax · 5-worker pool · circuit breaker (5 fail → 120 s
+          cooldown) · 5-min cache TTL</div>
       </div>
       <div class="chain-arrow">›</div>
       <div class="chain-step">
         <div class="chain-pri">Priority 2 — stored</div>
         <div class="chain-name">tb_hrooms.room_rate</div>
-        <div class="chain-detail">Per-brand DB · loaded by hotels team · may be weeks stale · still valid for display</div>
+        <div class="chain-detail">Per-brand DB · loaded by hotels team · may be weeks stale · still valid for display
+        </div>
       </div>
       <div class="chain-arrow">›</div>
       <div class="chain-step">
         <div class="chain-pri">Priority 3 — last resort</div>
         <div class="chain-name">hotel_starting_price</div>
-        <div class="chain-detail">Central DB scalar · marketing price · no room-type breakdown · never blocks a tool response</div>
+        <div class="chain-detail">Central DB scalar · marketing price · no room-type breakdown · never blocks a tool
+          response</div>
       </div>
     </div>
   </section>
@@ -862,49 +1092,56 @@
             <td class="strong">Go + modelcontextprotocol/go-sdk</td>
             <td><span class="status-badge accepted">Accepted</span></td>
             <td class="mono">cmd/…/main.go<br>internal/server/server.go</td>
-            <td>Go over Node.js/Python: single-binary deploy, monorepo consistency, compile-time type safety on tool schemas via generics</td>
+            <td>Go over Node.js/Python: single-binary deploy, monorepo consistency, compile-time type safety on tool
+              schemas via generics</td>
           </tr>
           <tr>
             <td class="mono strong">0002</td>
             <td class="strong">Multi-DB Pool with lazy per-brand connections</td>
             <td><span class="status-badge accepted">Accepted</span></td>
             <td class="mono">internal/repository/repository.go</td>
-            <td>Brand DBs connect on first request, not startup; nil stored on failure to avoid reconnect storms; INFORMATION_SCHEMA introspects diverged schemas</td>
+            <td>Brand DBs connect on first request, not startup; nil stored on failure to avoid reconnect storms;
+              INFORMATION_SCHEMA introspects diverged schemas</td>
           </tr>
           <tr>
             <td class="mono strong">0003</td>
             <td class="strong">Three-level rate fallback chain</td>
             <td><span class="status-badge accepted">Accepted</span></td>
             <td class="mono">internal/rate/rate.go<br>internal/rate/cache.go</td>
-            <td>SimpleBooking XML → stored room_rate → hotel_starting_price; rate errors never bubble as tool errors; 5-min TTL cache, circuit breaker on SB</td>
+            <td>SimpleBooking XML → stored room_rate → hotel_starting_price; rate errors never bubble as tool errors;
+              5-min TTL cache, circuit breaker on SB</td>
           </tr>
           <tr>
             <td class="mono strong">0004</td>
             <td class="strong">Gin v1.11 as HTTP transport wrapper</td>
             <td><span class="status-badge accepted">Accepted</span></td>
             <td class="mono">internal/server/server.go</td>
-            <td>Gin handles CORS, recovery, logging middleware; MCP handler wrapped via gin.WrapH; permissive CORS for MCP client compatibility</td>
+            <td>Gin handles CORS, recovery, logging middleware; MCP handler wrapped via gin.WrapH; permissive CORS for
+              MCP client compatibility</td>
           </tr>
           <tr>
             <td class="mono strong">0005</td>
             <td class="strong">Vite single-file UI as MCP App resource</td>
             <td><span class="status-badge accepted">Accepted</span></td>
             <td class="mono">ui/src/mcp-app.ts<br>internal/resources/dashboard.go</td>
-            <td>No React/Vue — vanilla TypeScript inlined by vite-plugin-singlefile; embedded via //go:embed; served as MCP resource with ext-apps protocol</td>
+            <td>No React/Vue — vanilla TypeScript inlined by vite-plugin-singlefile; embedded via //go:embed; served as
+              MCP resource with ext-apps protocol</td>
           </tr>
           <tr>
             <td class="mono strong">0006</td>
             <td class="strong">resizeImageURL — CSP-safe thumbnail rewriting</td>
             <td><span class="status-badge accepted">Accepted</span></td>
             <td class="mono">internal/repository/hotel.go</td>
-            <td>Pure URL rewriting to CDN; no base64 proxy, no server-side fetch; resourceDomains CSP header pre-authorises images.archipelagohotels.com</td>
+            <td>Pure URL rewriting to CDN; no base64 proxy, no server-side fetch; resourceDomains CSP header
+              pre-authorises images.archipelagohotels.com</td>
           </tr>
           <tr>
             <td class="mono strong">0007</td>
             <td class="strong">Raw hotel_currency code (no symbol map)</td>
             <td><span class="status-badge accepted">Accepted</span></td>
             <td class="mono">internal/repository/hotel.go<br>ui/src/mcp-app.ts</td>
-            <td>ISO 4217 code passed through unchanged; UI uses Intl.NumberFormat; adding new currencies requires zero code change on either side</td>
+            <td>ISO 4217 code passed through unchanged; UI uses Intl.NumberFormat; adding new currencies requires zero
+              code change on either side</td>
           </tr>
         </tbody>
       </table>
@@ -921,55 +1158,64 @@
 
       <div class="file-card">
         <div class="file-name">AGENTS.md</div>
-        <div class="file-desc">Agent configuration: tool manifest, data architecture, rate chain, invariants. Read by Claude Code at session start.</div>
+        <div class="file-desc">Agent configuration: tool manifest, data architecture, rate chain, invariants. Read by
+          Claude Code at session start.</div>
         <span class="file-type">agent context</span>
       </div>
 
       <div class="file-card">
         <div class="file-name">SYSTEM.md</div>
-        <div class="file-desc">System-level overview for LLM agents: transport modes, key file map, MCP tool registration pattern.</div>
+        <div class="file-desc">System-level overview for LLM agents: transport modes, key file map, MCP tool
+          registration pattern.</div>
         <span class="file-type">agent context</span>
       </div>
 
       <div class="file-card">
         <div class="file-name">DESIGN.md</div>
-        <div class="file-desc">Design document: four core principles, API patterns, data layer internals, rate service, UI design, error handling.</div>
+        <div class="file-desc">Design document: four core principles, API patterns, data layer internals, rate service,
+          UI design, error handling.</div>
         <span class="file-type">explanation</span>
       </div>
 
       <div class="file-card">
         <div class="file-name">PRODUCT.md</div>
-        <div class="file-desc">Product brief: what the server does, who it serves, Sentec PMS integration context, and scope boundaries.</div>
+        <div class="file-desc">Product brief: what the server does, who it serves, Sentec PMS integration context, and
+          scope boundaries.</div>
         <span class="file-type">product</span>
       </div>
 
       <div class="file-card">
         <div class="file-name">MEMORY.md</div>
-        <div class="file-desc">Persistent session memory: key decisions, open questions, and state to carry across Claude Code sessions.</div>
+        <div class="file-desc">Persistent session memory: key decisions, open questions, and state to carry across
+          Claude Code sessions.</div>
         <span class="file-type">agent context</span>
       </div>
 
       <div class="file-card">
         <div class="file-name">SKILL.md</div>
-        <div class="file-desc">Claude Code skill definition: GateGuard hook, read-before-edit rule, tool-usage preferences for this project.</div>
+        <div class="file-desc">Claude Code skill definition: GateGuard hook, read-before-edit rule, tool-usage
+          preferences for this project.</div>
         <span class="file-type">agent config</span>
       </div>
 
       <div class="file-card">
         <div class="file-name">SESSION_HANDOFF.md</div>
-        <div class="file-desc">End-of-session state snapshot: what was done, what is in-flight, and what the next session should start with.</div>
+        <div class="file-desc">End-of-session state snapshot: what was done, what is in-flight, and what the next
+          session should start with.</div>
         <span class="file-type">session state</span>
       </div>
 
       <div class="file-card">
         <div class="file-name">docs/llms.txt</div>
-        <div class="file-desc">Compact LLM-readable index of the entire codebase. Fits in a context window. Links to deeper docs.</div>
+        <div class="file-desc">Compact LLM-readable index of the entire codebase. Fits in a context window. Links to
+          deeper docs.</div>
         <span class="file-type">llm index</span>
       </div>
 
       <div class="file-card">
         <div class="file-name">docs/llms-full.txt</div>
-        <div class="file-desc">Full-content LLM document: complete tool schemas, all env vars, all key file contents for deep-context sessions.</div>
+        <div class="file-desc">Full-content LLM document: complete tool schemas, all env vars, all key file contents for
+          deep-context sessions.</div>
         <span class="file-type">llm index</span>
       </div>
 
@@ -985,7 +1231,11 @@
     <div class="table-wrap">
       <table>
         <thead>
-          <tr><th>Variable</th><th>Default</th><th>Purpose</th></tr>
+          <tr>
+            <th>Variable</th>
+            <th>Default</th>
+            <th>Purpose</th>
+          </tr>
         </thead>
         <tbody>
           <tr>
@@ -1063,7 +1313,7 @@
   </section>
 
   <footer class="footer">
-    <div class="footer-left">ARCHIPELAGO HOTELS MCP · SENTINEL TECH · DOCS 2026-06-22</div>
+    <div class="footer-left">ARCHIPELAGO HOTELS MCP · Public Website Team · DOCS 2026-06-22</div>
     <div class="footer-right">Diátaxis · 7 ADRs · 30+ documents · Go 1.25 · go-sdk v1.6.1</div>
   </footer>
 

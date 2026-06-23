@@ -1,7 +1,7 @@
 # Archipelago Hotels MCP — Design Document
 
-> **Product**: Sentec PMS / Archipelago Hotels MCP Server
-> **Maintainer**: Sentinel Tech
+> **Product**: Archipelago Hotels MCP Server
+> **Maintainer**: Public Website Team
 > **Last Updated**: 2026-06-22
 > **Status**: Active
 

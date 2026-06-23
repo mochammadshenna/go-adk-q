@@ -6,7 +6,7 @@ This document explains the end-to-end flow for hotel thumbnail images — from w
 
 ## 1. Source: `thumbnail_desktop` in Brand Databases
 
-Hotel thumbnail URLs are stored in the `thumbnail_desktop` column of the `tb_hotels` table in each brand's database. Not every brand database has this column — it is an optional column that only exists for brands where Sentec PMS has configured image hosting.
+Hotel thumbnail URLs are stored in the `thumbnail_desktop` column of the `tb_hotels` table in each brand's database. Not every brand database has this column — it is an optional column that only exists for brands where image hosting has been configured.
 
 `GetThumbnails` checks for the column before querying:
 
@@ -23,13 +23,12 @@ Each brand has its own database (identified by `DBPrefix`), so `GetThumbnails` f
 
 ## 2. CDN URLs: Brand-Hosted on Third-Party Domains
 
-The URLs retrieved from `thumbnail_desktop` point to brand CDNs. These are domains operated by Sentec Tech or brand-specific hosting, for example:
+The URLs retrieved from `thumbnail_desktop` point to brand CDNs. These are brand-specific hosting domains, for example:
 
 | Brand | Example CDN domain |
 |-------|-------------------|
 | Aston / Astonimc | `cdn.astonimc.com` |
-| Sentec platform assets | `sentineltech.com` |
-| Other Sentec brands | `storage.astonwebsite.com`, `cdn.harperhotel.com`, etc. |
+| Other brands | `storage.astonwebsite.com`, `cdn.harperhotel.com`, etc. |
 
 A raw URL looks like:
 
@@ -51,7 +50,7 @@ The server has no ability to relax or override the iframe CSP; that is controlle
 
 `resizeImageURL` is a **pure string transformation** — no HTTP requests, no DNS lookups, no network I/O. It rewrites a brand CDN URL into an equivalent URL on `images.archipelagohotels.com`, Archipelago's own image resizer service.
 
-The function is ported from `ResizeImage` in the production Sentec PMS codebase.
+The function is ported from `ResizeImage` in the production website codebase.
 
 ### Source
 
