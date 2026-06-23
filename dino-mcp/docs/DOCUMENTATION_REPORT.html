@@ -1,4 +1,4 @@
-<title>Archipelago Hotels MCP — Documentation Suite</title>
+<title>dino-mcp — Documentation Suite</title>
 <style>
   :root {
     --ground: #f5f6f8;
@@ -204,7 +204,6 @@
     gap: 0;
   }
 
-  /* Row = colored band on left + content area on right */
   .al-row {
     display: grid;
     grid-template-columns: 90px 1fr;
@@ -213,7 +212,6 @@
     border: 1px solid var(--border);
   }
 
-  /* Vertical label */
   .al-band {
     display: flex;
     align-items: center;
@@ -253,19 +251,12 @@
     border-right: 1px solid rgba(26, 138, 80, 0.18);
   }
 
-  .al-band.rate {
-    background: rgba(120, 60, 160, 0.07);
-    color: #7040a0;
-    border-right: 1px solid rgba(120, 60, 160, 0.18);
-  }
-
   .al-band.ui {
     background: rgba(11, 122, 112, 0.08);
     color: var(--accent);
     border-right: 1px solid rgba(11, 122, 112, 0.18);
   }
 
-  /* Content area: flex-wrap boxes */
   .al-content {
     display: flex;
     align-items: center;
@@ -276,7 +267,6 @@
     background: var(--ground);
   }
 
-  /* Component box */
   .al-box {
     background: var(--surface);
     border: 1px solid var(--border);
@@ -334,17 +324,6 @@
     background: rgba(26, 138, 80, 0.04);
   }
 
-  .al-box.rate-live {
-    border-color: #7040a0;
-    background: rgba(120, 60, 160, 0.05);
-    color: #7040a0;
-  }
-
-  .al-box.rate-live .al-sub {
-    color: rgba(112, 64, 160, 0.65);
-  }
-
-  /* Inline separators between boxes */
   .al-sep {
     font-family: var(--mono);
     font-size: 10px;
@@ -360,7 +339,6 @@
     font-size: 16px;
   }
 
-  /* Down-arrow connector between rows */
   .al-connector {
     display: flex;
     align-items: center;
@@ -589,8 +567,14 @@
   /* ── KEY FILES GRID ─────────────────────────────────── */
   .files-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    grid-template-columns: repeat(3, 1fr);
     gap: 12px;
+  }
+
+  @media (max-width: 700px) {
+    .files-grid {
+      grid-template-columns: 1fr;
+    }
   }
 
   .file-card {
@@ -675,71 +659,63 @@
     color: var(--text-dim);
   }
 
-  /* ── RATE CHAIN ─────────────────────────────────────── */
-  .chain-row {
+  /* ── DATA STATS (replaces rate chain) ───────────────── */
+  .stats-row {
     display: flex;
     align-items: stretch;
     flex-wrap: wrap;
-    gap: 0;
+    gap: 16px;
   }
 
-  .chain-step {
+  .stat-card {
     background: var(--surface);
     border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 16px 20px;
+    border-radius: 8px;
+    padding: 24px 28px;
     flex: 1;
-    min-width: 140px;
+    min-width: 180px;
+    text-align: center;
   }
 
-  .chain-arrow {
-    display: flex;
-    align-items: center;
-    padding: 0 6px;
-    color: var(--border);
-    font-size: 18px;
-    flex-shrink: 0;
-    align-self: center;
-  }
-
-  .chain-pri {
-    font-family: var(--mono);
-    font-size: 9.5px;
-    letter-spacing: 0.15em;
+  .stat-number {
+    font-size: 36px;
+    font-weight: 700;
     color: var(--accent);
-    text-transform: uppercase;
-    margin-bottom: 4px;
+    line-height: 1;
+    margin-bottom: 6px;
+    font-family: var(--mono);
   }
 
-  .chain-name {
+  .stat-label {
     font-size: 13px;
     font-weight: 600;
     color: var(--text);
-    margin-bottom: 3px;
+    margin-bottom: 8px;
   }
 
-  .chain-detail {
+  .stat-detail {
     font-size: 11.5px;
     color: var(--text-dim);
+    line-height: 1.5;
   }
 
   /* ── FOOTER ─────────────────────────────────────────── */
   .footer {
-    margin-top: 22px;
+    margin-top: 72px;
     overflow: hidden;
   }
 
   .footer-watermark {
     font-size: clamp(100px, 18vw, 160px);
-    font-weight: 900;
-    letter-spacing: 0.18em;
+    font-weight: 2000;
+    letter-spacing: 0.38em;
     text-align: center;
     line-height: 1;
     padding: 24px 0 0;
     margin-bottom: calc(clamp(100px, 18vw, 160px) / -6);
     background: repeating-linear-gradient(0deg,
-        rgba(0, 33, 91, 1) 0px,
-        rgba(0, 33, 91, 1)2px,
+        rgba(29, 111, 121, 1) 0px,
+        rgba(29, 111, 121, 1) 2px,
         transparent 2px,
         transparent 9px);
     -webkit-background-clip: text;
@@ -780,21 +756,20 @@
 ═══════════════════════════════════════════════════════ -->
 <header class="header">
   <div class="header-inner">
-    <div class="eyebrow">Archipelago Hotels · MCP Server</div>
-    <h1>Archipelago Hotels <span>MCP</span><br>Documentation Suite</h1>
+    <div class="eyebrow">Archipelago Hotels · Dino MCP · Demo Server</div>
+    <h1>dino-mcp — <span>Documentation</span> Suite</h1>
     <p class="header-sub">
-      Complete reference for the Go MCP server exposing Archipelago Hotels &amp; Resorts
-      to Claude Desktop and MCP-compatible agents. Single binary. Read-only. Graceful by design.
+      Go MCP server exposing a dinosaur encyclopedia to Claude Desktop.
+      Demo server. Single binary. No database. Read-only.
     </p>
     <div class="badge-row">
       <span class="badge"><span class="dot"></span>Go 1.25</span>
       <span class="badge"><span class="dot blue"></span>go-sdk v1.6.1</span>
-      <span class="badge"><span class="dot blue"></span>Gin v1.11.0</span>
-      <span class="badge"><span class="dot green"></span>Diátaxis Structure</span>
-      <span class="badge"><span class="dot"></span>4 MCP Tools</span>
-      <span class="badge"><span class="dot"></span>7 ADRs</span>
-      <span class="badge"><span class="dot green"></span>30+ Documents</span>
-      <span class="badge"><span class="dot blue"></span>Port :9011</span>
+      <span class="badge"><span class="dot blue"></span>Gin v1.12.0</span>
+      <span class="badge"><span class="dot green"></span>3 MCP Tools</span>
+      <span class="badge"><span class="dot"></span>6 ADRs</span>
+      <span class="badge"><span class="dot green"></span>No Database</span>
+      <span class="badge"><span class="dot blue"></span>Port :9010</span>
     </div>
   </div>
 </header>
@@ -802,7 +777,7 @@
 <main class="page">
 
   <!-- ══════════════════════════════════════════════════
-       ARCHITECTURE DIAGRAM — layered CSS boxes, no ASCII
+       ARCHITECTURE DIAGRAM
   ═══════════════════════════════════════════════════ -->
   <section>
     <div class="section-label">System Architecture</div>
@@ -820,8 +795,8 @@
             </div>
             <span class="al-sep">or</span>
             <div class="al-box">
-              Browser / CI Agent
-              <span class="al-sub">HTTP :9011 · Streamable HTTP</span>
+              Browser / Inspector
+              <span class="al-sub">HTTP :9010 · Streamable HTTP</span>
             </div>
           </div>
         </div>
@@ -833,7 +808,7 @@
           <div class="al-band server">MCP Server</div>
           <div class="al-content">
             <div class="al-box server-box">
-              archipelago-hotels-mcp
+              dino-mcp
               <span class="al-sub">internal/server/server.go · Gin HTTP wrapper + go-sdk v1.6.1</span>
             </div>
           </div>
@@ -846,20 +821,16 @@
           <div class="al-band tools">Tools</div>
           <div class="al-content">
             <div class="al-box">
-              search_hotels
-              <span class="al-sub">city / brand / query · limit 50</span>
+              dino_think
+              <span class="al-sub">random fact · no params</span>
             </div>
             <div class="al-box">
-              recommend_hotel
-              <span class="al-sub">vibe + budget scoring · limit 50</span>
-            </div>
-            <div class="al-box">
-              find_hotels
-              <span class="al-sub">full browse · limit 200</span>
+              dino_ask
+              <span class="al-sub">Q&amp;A · requires question</span>
             </div>
             <div class="al-box app-only">
-              get_hotel_detail
-              <span class="al-sub">app-only · hidden from Claude</span>
+              dino_dashboard
+              <span class="al-sub">MCP App · optional filter</span>
             </div>
           </div>
         </div>
@@ -871,42 +842,9 @@
           <div class="al-band data">Data</div>
           <div class="al-content">
             <div class="al-box data-box">
-              Pool.central
-              <span class="al-sub">db_archipelagowebsite · tb_hotels, tb_brands, tb_region</span>
-            </div>
-            <span class="al-sep">+</span>
-            <div class="al-box data-box">
-              Pool.brandDBs[ ]
-              <span class="al-sub">8 brands · lazy connect · INFORMATION_SCHEMA schema introspect · aston · neo · fave ·
-                alana · harper · kamuela · quest · pba</span>
-            </div>
-          </div>
-        </div>
-
-        <div class="al-connector"></div>
-
-        <!-- RATE SERVICE -->
-        <div class="al-row">
-          <div class="al-band rate">Rates</div>
-          <div class="al-content">
-            <div class="al-box rate-live">
-              SimpleBooking XML
-              <span class="al-sub">OTA_HotelAvailRQ · 5-worker pool · circuit breaker · 5 min TTL</span>
-            </div>
-            <span class="al-sep arrow">›</span>
-            <div class="al-box rate-live">
-              Sentec REST API
-              <span class="al-sub">hotel_channel = 'SENTEC' · credential_booking_engines</span>
-            </div>
-            <span class="al-sep arrow">›</span>
-            <div class="al-box">
-              tb_hrooms.room_rate
-              <span class="al-sub">stored fallback · per-brand DB</span>
-            </div>
-            <span class="al-sep arrow">›</span>
-            <div class="al-box">
-              hotel_starting_price
-              <span class="al-sub">central DB · last resort</span>
+              In-memory dataset
+              <span class="al-sub">47 dinosaurs · hardcoded · no DB dependency · Carnivore / Herbivore / Omnivore ·
+                Jurassic / Cretaceous / Triassic / Permian</span>
             </div>
           </div>
         </div>
@@ -919,17 +857,17 @@
           <div class="al-content">
             <div class="al-box origin">
               MCP Resource
-              <span class="al-sub">uri://hotel-dashboard · text/html;profile=mcp-app</span>
+              <span class="al-sub">ui://dino-dashboard/mcp-app.html · text/html;profile=mcp-app</span>
             </div>
             <span class="al-sep arrow">›</span>
             <div class="al-box">
-              mcp-app.html
-              <span class="al-sub">Vite + TypeScript · //go:embed</span>
+              dashboard_ui.html
+              <span class="al-sub">Vite + TypeScript · //go:embed · ext-apps SDK</span>
             </div>
-            <span class="al-sep">CSP:</span>
+            <span class="al-sep arrow">›</span>
             <div class="al-box">
-              resourceDomains
-              <span class="al-sub">images.archipelagohotels.com</span>
+              GET /dashboard
+              <span class="al-sub">standalone browser fallback · same HTML</span>
             </div>
           </div>
         </div>
@@ -939,38 +877,27 @@
   </section>
 
   <!-- ══════════════════════════════════════════════════
-       RATE FALLBACK CHAIN
+       DATA ARCHITECTURE
   ═══════════════════════════════════════════════════ -->
   <section>
-    <div class="section-label">Rate Resolution</div>
-    <h2>Four-level pricing fallback</h2>
-    <div class="chain-row">
-      <div class="chain-step">
-        <div class="chain-pri">Priority 1 — live</div>
-        <div class="chain-name">SimpleBooking XML</div>
-        <div class="chain-detail">OTA_HotelAvailRQ · TotalAfterTax · 5-worker pool · circuit breaker (5 fail → 120 s
-          cooldown) · 5-min cache TTL</div>
+    <div class="section-label">Data Architecture</div>
+    <h2>In-memory dinosaur dataset — no database required</h2>
+    <div class="stats-row">
+      <div class="stat-card">
+        <div class="stat-number">47</div>
+        <div class="stat-label">Dinosaurs</div>
+        <div class="stat-detail">Hardcoded in Go source. Zero DB connections. Server starts in milliseconds.</div>
       </div>
-      <div class="chain-arrow">›</div>
-      <div class="chain-step">
-        <div class="chain-pri">Priority 2 — live</div>
-        <div class="chain-name">Sentec REST API</div>
-        <div class="chain-detail">hotel_channel = 'SENTEC' · credentials from credential_booking_engines (brand DB) ·
-          env var fallback</div>
+      <div class="stat-card">
+        <div class="stat-number">3</div>
+        <div class="stat-label">Diet Types</div>
+        <div class="stat-detail">Carnivore · Herbivore · Omnivore. Filterable via dino_dashboard optional param.</div>
       </div>
-      <div class="chain-arrow">›</div>
-      <div class="chain-step">
-        <div class="chain-pri">Priority 3 — stored</div>
-        <div class="chain-name">tb_hrooms.room_rate</div>
-        <div class="chain-detail">Per-brand DB · loaded by hotels team · may be weeks stale · still valid for display
-        </div>
-      </div>
-      <div class="chain-arrow">›</div>
-      <div class="chain-step">
-        <div class="chain-pri">Priority 4 — last resort</div>
-        <div class="chain-name">hotel_starting_price</div>
-        <div class="chain-detail">Central DB scalar · marketing price · no room-type breakdown · never blocks a tool
-          response</div>
+      <div class="stat-card">
+        <div class="stat-number">4</div>
+        <div class="stat-label">Periods</div>
+        <div class="stat-detail">Jurassic · Cretaceous · Triassic · Permian. Filterable via dino_dashboard optional
+          param.</div>
       </div>
     </div>
   </section>
@@ -992,9 +919,8 @@
           </div>
         </div>
         <ul class="doc-list">
-          <li><span class="doc-name">01-getting-started.md</span> Install, configure, first run</li>
-          <li><span class="doc-name">02-first-tool.md</span> Call search_hotels from Claude Desktop</li>
-          <li><span class="doc-name">03-ui-development.md</span> Edit and rebuild the embedded UI</li>
+          <li><span class="doc-name">get-started.md</span> Install, configure, first run</li>
+          <li><span class="doc-name">first-tool.md</span> Call dino_think from Claude Desktop</li>
         </ul>
       </div>
 
@@ -1007,12 +933,8 @@
           </div>
         </div>
         <ul class="doc-list">
-          <li><span class="doc-name">configure-env.md</span> Set all environment variables</li>
-          <li><span class="doc-name">add-a-brand.md</span> Wire a new brand DB to the pool</li>
-          <li><span class="doc-name">debug-the-server.md</span> Inspect MCP traffic and logs</li>
-          <li><span class="doc-name">update-ui.md</span> Rebuild and re-embed mcp-app.html</li>
-          <li><span class="doc-name">build-deploy.md</span> Cross-compile, package, ship</li>
-          <li><span class="doc-name">test-mcp.md</span> Test tools without Claude Desktop</li>
+          <li><span class="doc-name">add-dinosaur.md</span> Extend the in-memory dataset</li>
+          <li><span class="doc-name">test-inspector.md</span> Test tools without Claude Desktop</li>
         </ul>
       </div>
 
@@ -1025,12 +947,7 @@
           </div>
         </div>
         <ul class="doc-list">
-          <li><span class="doc-name">tools-api.md</span> Full tool schemas, params, response types</li>
-          <li><span class="doc-name">environment-variables.md</span> All env vars with defaults</li>
-          <li><span class="doc-name">database-schema.md</span> Central DB tables and columns</li>
-          <li><span class="doc-name">build-and-deployment.md</span> Make targets, binary flags</li>
-          <li><span class="doc-name">cli.md</span> Command-line flags reference</li>
-          <li><span class="doc-name">api.md</span> HTTP REST endpoints (HTTP mode)</li>
+          <li><span class="doc-name">cli.md</span> Command-line flags and subcommands</li>
         </ul>
       </div>
 
@@ -1043,11 +960,7 @@
           </div>
         </div>
         <ul class="doc-list">
-          <li><span class="doc-name">architecture-overview.md</span> System design and four core principles</li>
-          <li><span class="doc-name">rate-fallback-strategy.md</span> Why four sources, not one</li>
-          <li><span class="doc-name">image-pipeline.md</span> URL rewriting and CSP constraints</li>
-          <li><span class="doc-name">ui-protocol.md</span> MCP Apps ext-apps spec and resource binding</li>
-          <li><span class="doc-name">data-model.md</span> Central vs brand DB relationship</li>
+          <li><span class="doc-name">architecture.md</span> System design and layer diagram</li>
         </ul>
       </div>
 
@@ -1059,7 +972,7 @@
   ═══════════════════════════════════════════════════ -->
   <section>
     <div class="section-label">Tool Registry</div>
-    <h2>All four MCP tools</h2>
+    <h2>All three MCP tools</h2>
     <div class="table-wrap">
       <table>
         <thead>
@@ -1068,42 +981,30 @@
             <th>Visibility</th>
             <th>Required params</th>
             <th>Optional params</th>
-            <th>Limit</th>
             <th>Purpose</th>
           </tr>
         </thead>
         <tbody>
           <tr>
-            <td class="mono">search_hotels</td>
+            <td class="mono">dino_think</td>
             <td><span class="vis-badge public">Claude + app</span></td>
             <td class="mono">—</td>
-            <td class="mono">city, country, brand, query</td>
-            <td class="mono">50</td>
-            <td>Full-text hotel search with live pricing</td>
-          </tr>
-          <tr>
-            <td class="mono">recommend_hotel</td>
-            <td><span class="vis-badge public">Claude + app</span></td>
-            <td class="mono">destination</td>
-            <td class="mono">vibe, budget, purpose</td>
-            <td class="mono">50</td>
-            <td>Additive scoring by vibe / budget / purpose; returns ranked candidates</td>
-          </tr>
-          <tr>
-            <td class="mono">find_hotels</td>
-            <td><span class="vis-badge public">Claude + app</span></td>
             <td class="mono">—</td>
-            <td class="mono">city, brand</td>
-            <td class="mono">200</td>
-            <td>Full portfolio browse; entry point for the dashboard view</td>
+            <td>Returns a random dinosaur fact with species name</td>
           </tr>
           <tr>
-            <td class="mono">get_hotel_detail</td>
-            <td><span class="vis-badge app-only">app only</span></td>
-            <td class="mono">hotelId</td>
+            <td class="mono">dino_ask</td>
+            <td><span class="vis-badge public">Claude + app</span></td>
+            <td class="mono">question</td>
             <td class="mono">—</td>
-            <td class="mono">1</td>
-            <td>Point lookup: rooms, rates, coordinates, address; called by embedded UI on card click</td>
+            <td>Answers dinosaur questions with species reference</td>
+          </tr>
+          <tr>
+            <td class="mono">dino_dashboard</td>
+            <td><span class="vis-badge app-only">app + Claude</span></td>
+            <td class="mono">—</td>
+            <td class="mono">filter</td>
+            <td>Opens MCP App UI with dino card grid; filter accepts carnivore / herbivore / jurassic etc.</td>
           </tr>
         </tbody>
       </table>
@@ -1130,60 +1031,49 @@
         <tbody>
           <tr>
             <td class="mono strong">0001</td>
-            <td class="strong">Go + modelcontextprotocol/go-sdk</td>
+            <td class="strong">Go Server Implementation</td>
             <td><span class="status-badge accepted">Accepted</span></td>
-            <td class="mono">cmd/…/main.go<br>internal/server/server.go</td>
-            <td>Go over Node.js/Python: single-binary deploy, monorepo consistency, compile-time type safety on tool
-              schemas via generics</td>
+            <td class="mono">cmd/dino-mcp/main.go<br>internal/server/server.go</td>
+            <td>Go + go-sdk v1.6.1 over Node/Python; single-binary; same language as parent monorepo for consistency
+            </td>
           </tr>
           <tr>
             <td class="mono strong">0002</td>
-            <td class="strong">Multi-DB Pool with lazy per-brand connections</td>
+            <td class="strong">Gin HTTP Router</td>
             <td><span class="status-badge accepted">Accepted</span></td>
-            <td class="mono">internal/repository/repository.go</td>
-            <td>Brand DBs connect on first request, not startup; nil stored on failure to avoid reconnect storms;
-              INFORMATION_SCHEMA introspects diverged schemas</td>
+            <td class="mono">internal/server/server.go</td>
+            <td>gin v1.12.0 for route matching, middleware, CORS, JSON responses; MCP handler wrapped via gin.WrapH</td>
           </tr>
           <tr>
             <td class="mono strong">0003</td>
-            <td class="strong">Four-level rate fallback chain</td>
+            <td class="strong">MCP Apps View Protocol</td>
             <td><span class="status-badge accepted">Accepted</span></td>
-            <td class="mono">internal/rate/rate.go<br>internal/rate/cache.go</td>
-            <td>SimpleBooking XML → Sentec REST → stored room_rate → hotel_starting_price; rate errors never bubble as
-              tool errors;
-              5-min TTL cache, circuit breaker on SB</td>
+            <td class="mono">internal/resources/dashboard.go<br>ui/src/mcp-app.ts</td>
+            <td>ext-apps SDK; text/html;profile=mcp-app MIME type; postMessage lifecycle
+              (initialize→tool-input→tool-result)</td>
           </tr>
           <tr>
             <td class="mono strong">0004</td>
-            <td class="strong">Gin v1.11 as HTTP transport wrapper</td>
+            <td class="strong">CORS Implementation</td>
             <td><span class="status-badge accepted">Accepted</span></td>
             <td class="mono">internal/server/server.go</td>
-            <td>Gin handles CORS, recovery, logging middleware; MCP handler wrapped via gin.WrapH; permissive CORS for
-              MCP client compatibility</td>
+            <td>Permissive CORS (wildcard) for MCP Inspector and Cloudflare Tunnel compatibility; OPTIONS preflight
+              handled</td>
           </tr>
           <tr>
             <td class="mono strong">0005</td>
-            <td class="strong">Vite single-file UI as MCP App resource</td>
+            <td class="strong">Transport Configuration</td>
             <td><span class="status-badge accepted">Accepted</span></td>
-            <td class="mono">ui/src/mcp-app.ts<br>internal/resources/dashboard.go</td>
-            <td>No React/Vue — vanilla TypeScript inlined by vite-plugin-singlefile; embedded via //go:embed; served as
-              MCP resource with ext-apps protocol</td>
+            <td class="mono">cmd/dino-mcp/main.go</td>
+            <td>stdio + Streamable HTTP dual transport; SSE not implemented (removed from MCP spec)</td>
           </tr>
           <tr>
             <td class="mono strong">0006</td>
-            <td class="strong">resizeImageURL — CSP-safe thumbnail rewriting</td>
+            <td class="strong">Standalone Dashboard Fallback</td>
             <td><span class="status-badge accepted">Accepted</span></td>
-            <td class="mono">internal/repository/hotel.go</td>
-            <td>Pure URL rewriting to CDN; no base64 proxy, no server-side fetch; resourceDomains CSP header
-              pre-authorises images.archipelagohotels.com</td>
-          </tr>
-          <tr>
-            <td class="mono strong">0007</td>
-            <td class="strong">Raw hotel_currency code (no symbol map)</td>
-            <td><span class="status-badge accepted">Accepted</span></td>
-            <td class="mono">internal/repository/hotel.go<br>ui/src/mcp-app.ts</td>
-            <td>ISO 4217 code passed through unchanged; UI uses Intl.NumberFormat; adding new currencies requires zero
-              code change on either side</td>
+            <td class="mono">internal/resources/dashboard_ui.html</td>
+            <td>Same HTML file serves as MCP App resource AND standalone browser page via GET /dashboard — zero
+              duplication</td>
           </tr>
         </tbody>
       </table>
@@ -1191,75 +1081,70 @@
   </section>
 
   <!-- ══════════════════════════════════════════════════
-       AGENT FILES
+       KEY FILES
   ═══════════════════════════════════════════════════ -->
   <section>
-    <div class="section-label">Root-level Documentation Files</div>
-    <h2>Agent and session context documents</h2>
+    <div class="section-label">Source Map</div>
+    <h2>Key files</h2>
     <div class="files-grid">
 
       <div class="file-card">
-        <div class="file-name">AGENTS.md</div>
-        <div class="file-desc">Agent configuration: tool manifest, data architecture, rate chain, invariants. Read by
-          Claude Code at session start.</div>
-        <span class="file-type">agent context</span>
+        <div class="file-name">cmd/dino-mcp/main.go</div>
+        <div class="file-desc">Entrypoint. Transport dispatch: stdio for Claude Desktop, HTTP for browser/Inspector.
+        </div>
+        <span class="file-type">entrypoint</span>
       </div>
 
       <div class="file-card">
-        <div class="file-name">SYSTEM.md</div>
-        <div class="file-desc">System-level overview for LLM agents: transport modes, key file map, MCP tool
-          registration pattern.</div>
-        <span class="file-type">agent context</span>
+        <div class="file-name">internal/server/server.go</div>
+        <div class="file-desc">MCP server wiring + Gin HTTP routes. Registers tools, resources, and CORS middleware.
+        </div>
+        <span class="file-type">server</span>
       </div>
 
       <div class="file-card">
-        <div class="file-name">DESIGN.md</div>
-        <div class="file-desc">Design document: four core principles, API patterns, data layer internals, rate service,
-          UI design, error handling.</div>
-        <span class="file-type">explanation</span>
+        <div class="file-name">internal/tools/think.go</div>
+        <div class="file-desc">dino_think handler. Picks a random dinosaur and returns a fact string.</div>
+        <span class="file-type">tool</span>
       </div>
 
       <div class="file-card">
-        <div class="file-name">PRODUCT.md</div>
-        <div class="file-desc">Product brief: what the server does, who it serves, rate provider integration context,
-          and
-          scope boundaries.</div>
-        <span class="file-type">product</span>
+        <div class="file-name">internal/tools/ask.go</div>
+        <div class="file-desc">dino_ask handler. Takes a question string, returns an answer with species reference.
+        </div>
+        <span class="file-type">tool</span>
       </div>
 
       <div class="file-card">
-        <div class="file-name">MEMORY.md</div>
-        <div class="file-desc">Persistent session memory: key decisions, open questions, and state to carry across
-          Claude Code sessions.</div>
-        <span class="file-type">agent context</span>
+        <div class="file-name">internal/tools/dashboard.go</div>
+        <div class="file-desc">dino_dashboard handler + in-memory dinosaur dataset (47 entries).</div>
+        <span class="file-type">tool + data</span>
       </div>
 
       <div class="file-card">
-        <div class="file-name">SKILL.md</div>
-        <div class="file-desc">Claude Code skill definition: GateGuard hook, read-before-edit rule, tool-usage
-          preferences for this project.</div>
-        <span class="file-type">agent config</span>
+        <div class="file-name">internal/tools/tools.go</div>
+        <div class="file-desc">Shared types: DinoSummary, DinoThinkResult, DinoAskResult and shared constants.</div>
+        <span class="file-type">types</span>
       </div>
 
       <div class="file-card">
-        <div class="file-name">SESSION_HANDOFF.md</div>
-        <div class="file-desc">End-of-session state snapshot: what was done, what is in-flight, and what the next
-          session should start with.</div>
-        <span class="file-type">session state</span>
+        <div class="file-name">internal/resources/dashboard.go</div>
+        <div class="file-desc">MCP resource registration. Binds dashboard_ui.html to ui://dino-dashboard/mcp-app.html
+          URI.</div>
+        <span class="file-type">resource</span>
       </div>
 
       <div class="file-card">
-        <div class="file-name">docs/llms.txt</div>
-        <div class="file-desc">Compact LLM-readable index of the entire codebase. Fits in a context window. Links to
-          deeper docs.</div>
-        <span class="file-type">llm index</span>
+        <div class="file-name">internal/resources/dashboard_ui.html</div>
+        <div class="file-desc">Embedded UI (generated by make build-ui — do not edit directly).</div>
+        <span class="file-type">generated</span>
       </div>
 
       <div class="file-card">
-        <div class="file-name">docs/llms-full.txt</div>
-        <div class="file-desc">Full-content LLM document: complete tool schemas, all env vars, all key file contents for
-          deep-context sessions.</div>
-        <span class="file-type">llm index</span>
+        <div class="file-name">ui/src/mcp-app.ts</div>
+        <div class="file-desc">TypeScript frontend source. Single file. Vite inlines everything via
+          vite-plugin-singlefile.</div>
+        <span class="file-type">ui source</span>
       </div>
 
     </div>
@@ -1282,49 +1167,14 @@
         </thead>
         <tbody>
           <tr>
-            <td class="mono">MYSQL_HOST</td>
-            <td><span class="env-default">127.0.0.1</span></td>
-            <td>MySQL host — central DB and all brand DBs must be reachable here</td>
+            <td class="mono">GIN_MODE</td>
+            <td><span class="env-default">(none)</span></td>
+            <td>Set to <code>release</code> for production — disables Gin debug output</td>
           </tr>
           <tr>
-            <td class="mono">MYSQL_PORT</td>
-            <td><span class="env-default">3306</span></td>
-            <td>MySQL port</td>
-          </tr>
-          <tr>
-            <td class="mono">MYSQL_USER</td>
-            <td><span class="env-default">root</span></td>
-            <td>MySQL user — must have SELECT on all central and brand databases</td>
-          </tr>
-          <tr>
-            <td class="mono">MYSQL_PASS</td>
-            <td><span class="env-default">(empty)</span></td>
-            <td>MySQL password</td>
-          </tr>
-          <tr>
-            <td class="mono">MYSQL_DB</td>
-            <td><span class="env-default">db_archipelagowebsite</span></td>
-            <td>Central catalog database — the only hard dependency; server fails to start if unreachable</td>
-          </tr>
-          <tr>
-            <td class="mono">DEBUG</td>
-            <td><span class="env-default">0</span></td>
-            <td>Set <code>1</code> to enable debug-level logging of SQL queries, rate calls, and pool operations</td>
-          </tr>
-          <tr>
-            <td class="mono">url_image_resizer</td>
-            <td><span class="env-default">https://images.archipelagohotels.com/</span></td>
-            <td>CDN proxy base URL rewritten by resizeImageURL(); must match resourceDomains in tool meta</td>
-          </tr>
-          <tr>
-            <td class="mono">SENTEC_USER</td>
-            <td><span class="env-default">website@archipelagointernational.com</span></td>
-            <td>Sentec API username — env fallback when brand DB has no SENTEC credential row</td>
-          </tr>
-          <tr>
-            <td class="mono">SENTEC_PASS</td>
-            <td><span class="env-default">(configured)</span></td>
-            <td>Sentec API password — env fallback when brand DB has no SENTEC credential row</td>
+            <td class="mono">DINO_VERBOSE</td>
+            <td><span class="env-default">(none)</span></td>
+            <td>Set any value to enable debug logging of tool calls and request routing</td>
           </tr>
         </tbody>
       </table>
@@ -1340,7 +1190,7 @@
     <div class="cmd-grid">
       <div class="cmd-card">
         <div class="cmd-line">make build</div>
-        <div class="cmd-desc">Full build: Vite UI → mcp-app.html, then Go binary → bin/archipelago-hotels-mcp</div>
+        <div class="cmd-desc">Full build: Vite UI → dashboard_ui.html, then Go binary → bin/dino-mcp</div>
       </div>
       <div class="cmd-card">
         <div class="cmd-line">make build-go</div>
@@ -1352,7 +1202,7 @@
       </div>
       <div class="cmd-card">
         <div class="cmd-line">make dev-http</div>
-        <div class="cmd-desc">Start HTTP mode on :9011 with verbose logging — no Claude Desktop needed</div>
+        <div class="cmd-desc">Start HTTP mode on :9010 with verbose logging — no Claude Desktop needed</div>
       </div>
       <div class="cmd-card">
         <div class="cmd-line">make run-stdio</div>
@@ -1360,7 +1210,7 @@
       </div>
       <div class="cmd-card">
         <div class="cmd-line">go vet ./...</div>
-        <div class="cmd-desc">Lint the entire module — also available as <code>make lint</code></div>
+        <div class="cmd-desc">Lint the entire module</div>
       </div>
     </div>
   </section>
@@ -1370,8 +1220,8 @@
 
 <footer class="footer">
   <div class="footer-meta">
-    <div class="footer-left">ARCHIPELAGO HOTELS MCP · Public Website Team · DOCS 2026-06-22</div>
-    <div class="footer-right">Diátaxis · 7 ADRs · 30+ documents · Go 1.25 · go-sdk v1.6.1</div>
+    <div class="footer-left">DINO-MCP · Public Website Team · DOCS 2026-06-23</div>
+    <div class="footer-right">6 ADRs · 3 MCP tools · 47 dinosaurs · Go 1.25 · go-sdk v1.6.1</div>
   </div>
-  <div class="footer-watermark">ARCHIPELAGO</div>
+  <div class="footer-watermark">DINOSAURS</div>
 </footer>
