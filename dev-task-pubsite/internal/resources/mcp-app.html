@@ -1,0 +1,731 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Task Dashboard — dev-task-pubsite</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0d1117;--surface:#161b22;--surface2:#21262d;--border:#30363d;
+  --text:#e6edf3;--muted:#8b949e;--accent:#58a6ff;--accent-dim:#1f6feb22;
+  --green:#3fb950;--yellow:#e3b341;--red:#f85149;--orange:#ff7b72;--purple:#8957e5;
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
+}
+body{background:var(--bg);color:var(--text);min-height:100vh;overflow:hidden}
+
+/* ─── Header ─────────────────────────────────────────────────── */
+.header{
+  display:flex;align-items:center;gap:10px;padding:0 16px;
+  height:52px;background:var(--surface);border-bottom:1px solid var(--border);
+  position:sticky;top:0;z-index:100;
+}
+.logo{font-size:11px;font-weight:700;letter-spacing:.08em;color:var(--muted);
+  text-transform:uppercase;white-space:nowrap;flex-shrink:0}
+.logo em{color:var(--accent);font-style:normal}
+.sep{width:1px;height:20px;background:var(--border);flex-shrink:0}
+.cfg{display:flex;gap:6px;align-items:center;flex:1;min-width:0}
+.cfg label{font-size:11px;color:var(--muted);flex-shrink:0}
+.cfg input{
+  background:var(--surface2);border:1px solid var(--border);border-radius:6px;
+  color:var(--text);font-size:12px;padding:4px 8px;min-width:0;
+  transition:border-color .15s;
+}
+.cfg input:focus{outline:none;border-color:var(--accent)}
+#cfg-project{width:72px}
+#cfg-owner{width:130px}
+#cfg-repo{width:140px}
+.hactions{display:flex;gap:6px;margin-left:auto;flex-shrink:0}
+
+/* ─── Buttons ────────────────────────────────────────────────── */
+.btn{
+  border:1px solid var(--border);border-radius:6px;background:var(--surface2);
+  color:var(--text);font-size:12px;padding:5px 12px;cursor:pointer;
+  display:inline-flex;align-items:center;gap:5px;transition:border-color .15s,background .15s;
+  white-space:nowrap;
+}
+.btn:hover{border-color:var(--accent);background:var(--accent-dim)}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn-p{background:var(--accent);border-color:var(--accent);color:#0d1117;font-weight:600}
+.btn-p:hover{background:#79c0ff;border-color:#79c0ff;color:#0d1117}
+
+/* ─── Status bar ─────────────────────────────────────────────── */
+.sbar{
+  display:flex;align-items:center;gap:12px;padding:4px 16px;
+  background:var(--surface);border-bottom:1px solid var(--border);
+  font-size:11px;color:var(--muted);min-height:28px;
+}
+.ok{color:var(--green)}.err{color:var(--red)}
+.ps{
+  margin-left:auto;display:flex;align-items:center;gap:5px;
+  padding:2px 8px;border-radius:3px;font-size:10px;
+}
+.ps.live{background:#0d2119;color:var(--green);border:1px solid #238636}
+.ps.stale{background:#2d1f00;color:var(--yellow);border:1px solid #6e3b03}
+
+/* ─── Board ──────────────────────────────────────────────────── */
+.board{
+  display:grid;grid-template-columns:repeat(3,1fr);gap:12px;padding:12px;
+  height:calc(100vh - 80px);
+}
+.col{
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  display:flex;flex-direction:column;overflow:hidden;min-height:0;
+}
+.col-head{
+  padding:10px 14px;border-bottom:1px solid var(--border);flex-shrink:0;
+  display:flex;justify-content:space-between;align-items:center;
+}
+.col-title{font-size:11px;font-weight:600;text-transform:uppercase;
+  letter-spacing:.07em;color:var(--muted)}
+.col-cnt{
+  font-size:11px;background:var(--surface2);border:1px solid var(--border);
+  border-radius:10px;padding:1px 7px;color:var(--muted);font-weight:600;
+}
+.col-body{
+  flex:1;overflow-y:auto;padding:8px;display:flex;flex-direction:column;gap:6px;
+  min-height:0;
+}
+.col-body::-webkit-scrollbar{width:4px}
+.col-body::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+
+/* ─── Card ───────────────────────────────────────────────────── */
+.card{
+  background:var(--surface2);border:1px solid var(--border);border-radius:6px;
+  padding:10px 12px;cursor:pointer;transition:border-color .15s,box-shadow .15s;
+  border-left:3px solid var(--border);
+}
+.card:hover{border-color:var(--accent);box-shadow:0 2px 10px rgba(0,0,0,.35)}
+.card-top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:5px}
+.card-id{font-size:11px;font-family:ui-monospace,'SF Mono',monospace;
+  color:var(--accent);font-weight:700}
+.card-type{font-size:10px;padding:1px 6px;border-radius:3px;
+  background:var(--surface);border:1px solid var(--border);color:var(--muted)}
+.card-sum{font-size:12px;color:var(--text);line-height:1.45;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.card-foot{display:flex;gap:5px;align-items:center;margin-top:8px;flex-wrap:wrap}
+.badge{font-size:10px;padding:1px 6px;border-radius:3px;font-weight:500;
+  background:var(--surface);border:1px solid;white-space:nowrap}
+.who{font-size:10px;color:var(--muted);margin-left:auto;white-space:nowrap}
+.who::before{content:'@';opacity:.5}
+
+/* ─── Empty / Loader ─────────────────────────────────────────── */
+.empty{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:8px;padding:40px 16px;color:var(--muted);font-size:12px;text-align:center;flex:1;
+}
+.empty-icon{font-size:26px;opacity:.45}
+.spin{
+  width:16px;height:16px;border:2px solid var(--border);
+  border-top-color:var(--accent);border-radius:50%;
+  animation:rot .7s linear infinite;display:inline-block;
+}
+@keyframes rot{to{transform:rotate(360deg)}}
+
+/* ─── Modal ──────────────────────────────────────────────────── */
+.bd{
+  position:fixed;inset:0;background:rgba(0,0,0,.78);
+  display:none;align-items:center;justify-content:center;
+  z-index:1000;padding:20px;
+}
+.bd.open{display:flex}
+.modal{
+  background:var(--surface);border:1px solid var(--border);border-radius:12px;
+  width:100%;max-width:740px;max-height:88vh;display:flex;flex-direction:column;
+  overflow:hidden;box-shadow:0 24px 64px rgba(0,0,0,.55);
+}
+.mhead{padding:18px 22px 14px;border-bottom:1px solid var(--border)}
+.mrow{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.mid{font-family:ui-monospace,'SF Mono',monospace;font-size:11px;
+  color:var(--accent);font-weight:700;letter-spacing:.04em;margin-bottom:6px}
+.msum{font-size:15px;font-weight:500;color:var(--text);line-height:1.45}
+.mbadges{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap}
+.mclose{
+  background:none;border:1px solid var(--border);border-radius:6px;
+  color:var(--muted);cursor:pointer;width:28px;height:28px;font-size:15px;
+  display:flex;align-items:center;justify-content:center;flex-shrink:0;
+  transition:border-color .15s,color .15s;
+}
+.mclose:hover{border-color:var(--red);color:var(--red)}
+.mtabs{display:flex;border-bottom:1px solid var(--border);padding:0 22px;gap:2px}
+.tab{
+  padding:8px 14px;cursor:pointer;border-bottom:2px solid transparent;
+  font-size:12px;color:var(--muted);font-weight:500;transition:color .15s;
+  user-select:none;
+}
+.tab.on{border-bottom-color:var(--accent);color:var(--text)}
+.tab:hover:not(.on){color:var(--text)}
+.mbody{flex:1;overflow-y:auto;padding:20px 22px;min-height:0}
+.mbody::-webkit-scrollbar{width:4px}
+.mbody::-webkit-scrollbar-thumb{background:var(--border)}
+
+/* ─── Details tab ────────────────────────────────────────────── */
+.dgrid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px}
+.di label{display:block;font-size:10px;color:var(--muted);
+  text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px}
+.di .v{font-size:13px;color:var(--text)}
+.sec-label{font-size:10px;color:var(--muted);text-transform:uppercase;
+  letter-spacing:.06em;margin-bottom:6px}
+.desc-box{
+  background:var(--surface2);border:1px solid var(--border);border-radius:6px;
+  padding:12px;font-size:12px;line-height:1.6;color:var(--text);
+  white-space:pre-wrap;max-height:220px;overflow-y:auto;
+}
+.desc-box.none{color:var(--muted);font-style:italic}
+
+/* ─── PR tab ─────────────────────────────────────────────────── */
+.pr{
+  background:var(--surface2);border:1px solid var(--border);border-radius:8px;
+  padding:12px 14px;margin-bottom:8px;
+}
+.pr-top{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;
+  margin-bottom:8px}
+.pr-num{font-size:11px;font-family:monospace;color:var(--muted)}
+.pr-title{font-size:13px;font-weight:500;color:var(--text);margin-top:3px}
+.pr-meta{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.pr-branch{font-size:10px;font-family:monospace;
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:3px;padding:1px 6px;color:var(--muted)}
+.extlink{
+  font-size:11px;color:var(--accent);text-decoration:none;
+  display:inline-flex;align-items:center;gap:3px;
+}
+.extlink:hover{text-decoration:underline}
+.pr-actions{display:flex;gap:8px;margin-top:10px;align-items:center}
+.pr-author{font-size:10px;color:var(--muted);margin-left:auto}
+.pr-author::before{content:'@';opacity:.5}
+
+/* ─── Stats tab ──────────────────────────────────────────────── */
+.sgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.scard{
+  background:var(--surface2);border:1px solid var(--border);border-radius:8px;
+  padding:14px;text-align:center;
+}
+.sval{font-size:20px;font-weight:700;color:var(--accent)}
+.slabel{font-size:10px;color:var(--muted);margin-top:4px;text-transform:uppercase;
+  letter-spacing:.06em}
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="logo">SENTINEL<em>TECH</em> / Task Dashboard</div>
+    <div class="sep"></div>
+    <div class="cfg">
+      <label>Project</label>
+      <input id="cfg-project" placeholder="PBA">
+      <label>Owner</label>
+      <input id="cfg-owner" placeholder="github-owner">
+      <label>Repo</label>
+      <input id="cfg-repo" placeholder="repository-name">
+    </div>
+    <div class="hactions">
+      <button class="btn btn-p" id="btn-load">Load Tasks</button>
+      <button class="btn" id="btn-refresh" title="Refresh" disabled>&#8635; Refresh</button>
+    </div>
+  </div>
+  <div class="sbar">
+    <span id="s-msg">Enter project name and click Load Tasks</span>
+    <span id="s-ps"></span>
+  </div>
+  <div class="board">
+    <div class="col">
+      <div class="col-head">
+        <span class="col-title">Open</span>
+        <span class="col-cnt" id="c-open">0</span>
+      </div>
+      <div class="col-body" id="b-open">
+        <div class="empty"><span class="empty-icon">&#128203;</span><span>No tasks loaded</span></div>
+      </div>
+    </div>
+    <div class="col">
+      <div class="col-head">
+        <span class="col-title">In Progress</span>
+        <span class="col-cnt" id="c-active">0</span>
+      </div>
+      <div class="col-body" id="b-active">
+        <div class="empty"><span class="empty-icon">&#9889;</span><span>No tasks loaded</span></div>
+      </div>
+    </div>
+    <div class="col">
+      <div class="col-head">
+        <span class="col-title">Done</span>
+        <span class="col-cnt" id="c-done">0</span>
+      </div>
+      <div class="col-body" id="b-done">
+        <div class="empty"><span class="empty-icon">&#10003;</span><span>No tasks loaded</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal -->
+  <div class="bd" id="bd">
+    <div class="modal">
+      <div class="mhead">
+        <div class="mrow">
+          <div style="min-width:0">
+            <div class="mid" id="m-id"></div>
+            <div class="msum" id="m-sum"></div>
+          </div>
+          <button class="mclose" id="btn-close" title="Close (Esc)">&#10005;</button>
+        </div>
+        <div class="mbadges" id="m-badges"></div>
+      </div>
+      <div class="mtabs">
+        <div class="tab on" data-tab="details">Details</div>
+        <div class="tab" data-tab="prs">Linked PRs</div>
+        <div class="tab" data-tab="stats">Repo Stats</div>
+      </div>
+      <div class="mbody" id="mbody"></div>
+    </div>
+  </div>
+
+  <script>
+// ── Config ───────────────────────────────────────────────────────────────────
+var CK = 'sentec-task-dash';
+var cfg = Object.assign({ project: '', owner: '', repo: '' },
+  (function() { try { return JSON.parse(localStorage.getItem(CK) || '{}'); } catch(e) { return {}; } })()
+);
+
+function saveCfg() {
+  cfg.project = (document.getElementById('cfg-project').value || '').trim().toUpperCase();
+  cfg.owner   = (document.getElementById('cfg-owner').value || '').trim();
+  cfg.repo    = (document.getElementById('cfg-repo').value || '').trim();
+  localStorage.setItem(CK, JSON.stringify(cfg));
+}
+function loadCfg() {
+  document.getElementById('cfg-project').value = cfg.project;
+  document.getElementById('cfg-owner').value   = cfg.owner;
+  document.getElementById('cfg-repo').value    = cfg.repo;
+}
+
+// ── MCP client ───────────────────────────────────────────────────────────────
+var MCP = {
+  sid: null,
+  n: 1,
+
+  init: function() {
+    var self = this;
+    return fetch('/mcp', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json, text/event-stream' },
+      body: JSON.stringify({
+        jsonrpc: '2.0', id: self.n++, method: 'initialize',
+        params: { protocolVersion: '2024-11-05', capabilities: {},
+          clientInfo: { name: 'task-dashboard', version: '1.0' } }
+      })
+    }).then(function(r) {
+      self.sid = r.headers.get('Mcp-Session-Id') || null;
+      return self._parse(r);
+    }).then(function() {
+      if (self.sid) {
+        fetch('/mcp', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Mcp-Session-Id': self.sid },
+          body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized', params: {} })
+        }).catch(function() {});
+      }
+    }).catch(function(e) {
+      console.warn('MCP init failed, will try stateless:', e.message);
+    });
+  },
+
+  _parse: function(r) {
+    var ct = r.headers.get('Content-Type') || '';
+    return r.text().then(function(txt) {
+      if (ct.indexOf('text/event-stream') !== -1) {
+        var lines = txt.split('\n');
+        for (var i = 0; i < lines.length; i++) {
+          if (lines[i].indexOf('data: ') === 0) {
+            try {
+              var d = JSON.parse(lines[i].slice(6));
+              if (d.result !== undefined || d.error !== undefined) return d;
+            } catch(e) {}
+          }
+        }
+        try { return JSON.parse(txt); } catch(e) {}
+        throw new Error('No parseable SSE result');
+      }
+      return JSON.parse(txt || '{}');
+    });
+  },
+
+  call: function(name, args) {
+    var self = this;
+    var headers = { 'Content-Type': 'application/json', 'Accept': 'application/json, text/event-stream' };
+    if (self.sid) headers['Mcp-Session-Id'] = self.sid;
+    return fetch('/mcp', {
+      method: 'POST', headers: headers,
+      body: JSON.stringify({ jsonrpc: '2.0', id: self.n++, method: 'tools/call',
+        params: { name: name, arguments: args } })
+    }).then(function(r) {
+      return self._parse(r);
+    }).then(function(data) {
+      if (data && data.error) throw new Error(data.error.message || JSON.stringify(data.error));
+      var cnt = data && data.result && data.result.content;
+      var text = cnt && cnt[0] && cnt[0].text;
+      if (!text) return {};
+      return JSON.parse(text);
+    });
+  }
+};
+
+// ── State ────────────────────────────────────────────────────────────────────
+var tasks    = [];
+var prCache  = {};
+var statsCache = null;
+var mTask    = null;
+var mTab     = 'details';
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+var DONE_RE   = /^(done|fixed|resolved|closed|completed|verified|wont.?fix|can.?t.?repro|cancelled|rejected|obsolete)/i;
+var ACTIVE_RE = /^(in.?progress|in.?review|active|started|under.?review|in.?testing|code.?review)/i;
+
+function groupTasks(ts) {
+  var o = [], a = [], d = [];
+  for (var i = 0; i < ts.length; i++) {
+    var t = ts[i];
+    if (DONE_RE.test(t.state))        d.push(t);
+    else if (ACTIVE_RE.test(t.state)) a.push(t);
+    else                               o.push(t);
+  }
+  var PRIO = { critical: 0, 'show-stopper': 0, major: 1, normal: 2, minor: 3 };
+  function srt(x, y) {
+    var px = PRIO[(x.priority||'').toLowerCase()];
+    var py = PRIO[(y.priority||'').toLowerCase()];
+    if (px === undefined) px = 2;
+    if (py === undefined) py = 2;
+    return px - py;
+  }
+  return [o.sort(srt), a.sort(srt), d];
+}
+
+function pc(p) {
+  if (!p) return '#6e7681';
+  var l = p.toLowerCase();
+  if (l.indexOf('critical') !== -1 || l.indexOf('show') !== -1) return '#f85149';
+  if (l.indexOf('major') !== -1) return '#ff7b72';
+  if (l.indexOf('minor') !== -1) return '#6e7681';
+  return '#3fb950';
+}
+function sc(s) {
+  if (!s) return '#6e7681';
+  var l = s.toLowerCase();
+  if (DONE_RE.test(l))   return '#6e7681';
+  if (ACTIVE_RE.test(l)) return '#9e6a03';
+  return '#238636';
+}
+function bdg(txt, col) {
+  return '<span class="badge" style="color:' + col + ';border-color:' + col + '22;background:' + col + '11">' + x(txt) + '</span>';
+}
+function x(s) {
+  if (s == null) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+// Reject non-http(s) URLs to prevent javascript:/data: injection
+function safeHref(u) {
+  try {
+    var p = new URL(String(u || ''));
+    return (p.protocol === 'https:' || p.protocol === 'http:') ? p.href : '#';
+  } catch(e) { return '#'; }
+}
+// Safe numeric display — only renders if value is actually a number
+function num(v) { return typeof v === 'number' ? v : '&#8212;'; }
+function fd(s) {
+  if (!s) return '&#8212;';
+  var d = new Date(s);
+  return isNaN(d.getTime()) ? String(s) : d.toLocaleDateString('en-US', { year:'numeric', month:'short', day:'numeric' });
+}
+
+// ── Board ─────────────────────────────────────────────────────────────────────
+function renderBoard() {
+  var groups = groupTasks(tasks);
+  var op = groups[0], ac = groups[1], dn = groups[2];
+  document.getElementById('c-open').textContent   = op.length;
+  document.getElementById('c-active').textContent = ac.length;
+  document.getElementById('c-done').textContent   = dn.length;
+  document.getElementById('b-open').innerHTML   = mkCards(op, 'open');
+  document.getElementById('b-active').innerHTML = mkCards(ac, 'active');
+  document.getElementById('b-done').innerHTML   = mkCards(dn, 'done');
+}
+
+function mkCards(ts, col) {
+  if (!ts.length) {
+    var icons = { open: '&#128203;', active: '&#9889;', done: '&#10003;' };
+    var msgs  = { open: 'No open tasks', active: 'Nothing in progress', done: 'Nothing resolved yet' };
+    return '<div class="empty"><span class="empty-icon">' + icons[col] + '</span><span>' + msgs[col] + '</span></div>';
+  }
+  var html = '';
+  for (var i = 0; i < ts.length; i++) {
+    var t = ts[i];
+    var color = pc(t.priority);
+    var type  = t.type || 'Task';
+    var who   = t.assignee && (t.assignee.login || t.assignee.fullName) || '';
+    html += '<div class="card" data-sid="' + x(t.shortId) + '" style="border-left-color:' + color + '">' +
+      '<div class="card-top">' +
+        '<span class="card-id">' + x(t.shortId) + '</span>' +
+        '<span class="card-type">' + x(type) + '</span>' +
+      '</div>' +
+      '<div class="card-sum">' + x(t.summary) + '</div>' +
+      '<div class="card-foot">' +
+        (t.priority ? bdg(t.priority, color) : '') +
+        (t.sprint ? '<span class="badge" style="color:var(--muted);border-color:var(--border);background:var(--surface)">&#9889; ' + x(t.sprint) + '</span>' : '') +
+        (who ? '<span class="who">' + x(who) + '</span>' : '') +
+      '</div>' +
+    '</div>';
+  }
+  return html;
+}
+
+// ── Modal ─────────────────────────────────────────────────────────────────────
+function openModal(shortId) {
+  var t = null;
+  for (var i = 0; i < tasks.length; i++) {
+    if (tasks[i].shortId === shortId) { t = tasks[i]; break; }
+  }
+  if (!t) return;
+  mTask = t;
+  mTab  = 'details';
+  shellModal(t);
+  renderTab();
+  document.getElementById('bd').classList.add('open');
+  document.body.style.overflow = 'hidden';
+}
+function closeModal() {
+  document.getElementById('bd').classList.remove('open');
+  document.body.style.overflow = '';
+  mTask = null;
+}
+function shellModal(t) {
+  document.getElementById('m-id').textContent  = t.shortId + '  ·  ' + (t.project || '');
+  document.getElementById('m-sum').textContent = t.summary;
+  document.getElementById('m-badges').innerHTML =
+    (t.state    ? bdg(t.state,    sc(t.state))    : '') +
+    (t.priority ? bdg(t.priority, pc(t.priority)) : '') +
+    (t.type     ? bdg(t.type,     '#8b949e')       : '') +
+    (t.sprint   ? bdg('⚡ ' + t.sprint, '#6e7681') : '');
+  setActiveTab(mTab);
+}
+function setActiveTab(tab) {
+  mTab = tab;
+  var tabs = document.querySelectorAll('.tab');
+  for (var i = 0; i < tabs.length; i++) {
+    tabs[i].classList.toggle('on', tabs[i].getAttribute('data-tab') === tab);
+  }
+}
+function renderTab() {
+  var el = document.getElementById('mbody');
+  if (mTab === 'details') {
+    el.innerHTML = detailsTab(mTask);
+  } else if (mTab === 'prs') {
+    if (prCache[mTask.shortId]) {
+      el.innerHTML = prsTab(prCache[mTask.shortId], mTask.shortId);
+    } else {
+      el.innerHTML = '<div class="empty"><span class="spin"></span></div>';
+      loadPRs(mTask);
+    }
+  } else if (mTab === 'stats') {
+    if (statsCache) {
+      el.innerHTML = statsTab(statsCache);
+    } else {
+      el.innerHTML = '<div class="empty"><span class="spin"></span></div>';
+      loadStats();
+    }
+  }
+}
+
+// ── Details tab ───────────────────────────────────────────────────────────────
+function detailsTab(t) {
+  var who = '&#8212;';
+  if (t.assignee) {
+    var name  = t.assignee.fullName || t.assignee.login || '&#8212;';
+    var login = t.assignee.login || '';
+    who = x(name) + (login && t.assignee.fullName ? ' <span style="color:var(--muted)">@' + x(login) + '</span>' : '');
+  }
+  var desc = (t.description || '').trim();
+  return '<div class="dgrid">' +
+    '<div class="di"><label>State</label><div class="v">' + x(t.state||'&#8212;') + '</div></div>' +
+    '<div class="di"><label>Priority</label><div class="v">' + x(t.priority||'&#8212;') + '</div></div>' +
+    '<div class="di"><label>Assignee</label><div class="v">' + who + '</div></div>' +
+    '<div class="di"><label>Sprint</label><div class="v">' + x(t.sprint||'&#8212;') + '</div></div>' +
+    '<div class="di"><label>Created</label><div class="v">' + fd(t.created) + '</div></div>' +
+    '<div class="di"><label>Updated</label><div class="v">' + fd(t.updated) + '</div></div>' +
+  '</div>' +
+  '<div class="sec-label">Description</div>' +
+  '<div class="desc-box' + (desc ? '' : ' none') + '">' + (desc ? x(desc) : 'No description provided.') + '</div>';
+}
+
+// ── PR tab ────────────────────────────────────────────────────────────────────
+function loadPRs(task) {
+  if (!cfg.owner || !cfg.repo) {
+    setMBody('<div class="empty"><span>Set GitHub Owner &amp; Repo in the header to see linked PRs</span></div>', task.shortId, 'prs');
+    return;
+  }
+  MCP.call('list_pull_requests', { owner: cfg.owner, repo: cfg.repo, state: 'all' })
+    .then(function(res) {
+      var all = res.pullRequests || [];
+      var id  = task.shortId.toLowerCase();
+      var hits = [];
+      for (var i = 0; i < all.length; i++) {
+        var pr = all[i];
+        if ((pr.title      || '').toLowerCase().indexOf(id) !== -1 ||
+            (pr.headBranch || '').toLowerCase().indexOf(id) !== -1) {
+          hits.push(pr);
+        }
+      }
+      prCache[task.shortId] = hits;
+      setMBody(prsTab(hits, task.shortId), task.shortId, 'prs');
+    })
+    .catch(function(e) {
+      setMBody('<div class="empty"><span class="err">Failed to load PRs: ' + x(e.message) + '</span></div>', task.shortId, 'prs');
+    });
+}
+
+function prsTab(prs, taskId) {
+  if (!prs.length) {
+    return '<div class="empty">' +
+      '<span class="empty-icon">&#128269;</span>' +
+      '<span>No PRs found referencing <strong>' + x(taskId) + '</strong></span>' +
+      '<span style="font-size:11px">Searched PR titles and head branch names</span>' +
+    '</div>';
+  }
+  var html = '';
+  for (var i = 0; i < prs.length; i++) {
+    var pr = prs[i];
+    var state = pr.state || 'unknown';
+    var stc   = state === 'open' ? '#238636' : state === 'merged' ? '#8957e5' : '#6e7681';
+    var ciCol = pr.ciStatus === 'success' ? '#3fb950' : pr.ciStatus === 'failure' ? '#f85149' : '#6e7681';
+    html += '<div class="pr">' +
+      '<div class="pr-top">' +
+        '<div>' +
+          '<div class="pr-num">#' + Number(pr.number) + '</div>' +
+          '<div class="pr-title">' + x(pr.title) + '</div>' +
+        '</div>' +
+        '<a href="' + x(safeHref(pr.url)) + '" target="_blank" rel="noopener" class="extlink">Open &#8599;</a>' +
+      '</div>' +
+      '<div class="pr-meta">' +
+        bdg(state, stc) +
+        (pr.draft ? bdg('Draft', '#6e7681') : '') +
+        (pr.ciStatus ? '<span class="badge" style="color:' + ciCol + ';border-color:' + ciCol + '22;background:' + ciCol + '11">CI: ' + x(pr.ciStatus) + '</span>' : '') +
+        (pr.reviewState ? bdg(pr.reviewState, '#8b949e') : '') +
+        '<span class="pr-branch">' + x(pr.headBranch) + ' &#8594; ' + x(pr.baseBranch) + '</span>' +
+      '</div>' +
+      '<div class="pr-actions">' +
+        '<a href="' + x(safeHref(pr.url)) + '/files" target="_blank" rel="noopener" class="btn" style="font-size:11px;padding:3px 8px">View Diff &#8599;</a>' +
+        (pr.mergedAt ? '<span style="font-size:11px;color:var(--muted)">Merged ' + fd(pr.mergedAt) + '</span>' : '') +
+        '<span class="pr-author">' + x(pr.author) + '</span>' +
+      '</div>' +
+    '</div>';
+  }
+  return html;
+}
+
+// ── Stats tab ─────────────────────────────────────────────────────────────────
+function loadStats() {
+  if (!cfg.owner || !cfg.repo) {
+    setMBody('<div class="empty"><span>Set GitHub Owner &amp; Repo in the header to see stats</span></div>', null, 'stats');
+    return;
+  }
+  MCP.call('repo_stats', { owner: cfg.owner, repo: cfg.repo })
+    .then(function(res) {
+      statsCache = res.stats || res;
+      setMBody(statsTab(statsCache), null, 'stats');
+    })
+    .catch(function(e) {
+      setMBody('<div class="empty"><span class="err">Failed to load stats: ' + x(e.message) + '</span></div>', null, 'stats');
+    });
+}
+
+function statsTab(s) {
+  if (!s) return '<div class="empty"><span>No stats available</span></div>';
+  return '<div class="sgrid">' +
+    '<div class="scard"><div class="sval">&#9733; ' + num(s.stars) + '</div><div class="slabel">Stars</div></div>' +
+    '<div class="scard"><div class="sval">&#8942; ' + num(s.forks) + '</div><div class="slabel">Forks</div></div>' +
+    '<div class="scard"><div class="sval">' + num(s.openIssues) + '</div><div class="slabel">Open Issues</div></div>' +
+    '<div class="scard"><div class="sval">' + num(s.openPRs) + '</div><div class="slabel">Open PRs</div></div>' +
+    '<div class="scard"><div class="sval">' + x(s.language||'&#8212;') + '</div><div class="slabel">Language</div></div>' +
+    '<div class="scard"><div class="sval">' + x(s.defaultBranch||'&#8212;') + '</div><div class="slabel">Default Branch</div></div>' +
+  '</div>' +
+  '<div style="margin-top:14px;font-size:12px;color:var(--muted);text-align:center">' + x(s.owner) + '/' + x(s.repo) + '</div>';
+}
+
+function setMBody(html, shortId, tab) {
+  if (mTab !== tab) return;
+  if (shortId && mTask && mTask.shortId !== shortId) return;
+  document.getElementById('mbody').innerHTML = html;
+}
+
+// ── Task loading ──────────────────────────────────────────────────────────────
+function setStatus(msg, cls) {
+  var el = document.getElementById('s-msg');
+  el.textContent = msg;
+  el.className = cls || '';
+}
+function setPS(ps) {
+  var el = document.getElementById('s-ps');
+  if (!ps) { el.innerHTML = ''; return; }
+  var cls = ps.degraded ? 'stale' : 'live';
+  var lbl = ps.degraded
+    ? '&#9888; ' + ps.source + ' &#8212; stale (' + (ps.staleAge || 'unknown') + ')'
+    : '&#9679; ' + ps.source;
+  el.innerHTML = '<span class="ps ' + cls + '">' + x(lbl) + '</span>';
+}
+
+function loadTasks() {
+  saveCfg();
+  if (!cfg.project) { setStatus('Enter a project name', 'err'); return; }
+  prCache    = {};
+  statsCache = null;
+  setStatus('Loading…');
+  document.getElementById('btn-load').disabled    = true;
+  document.getElementById('btn-refresh').disabled = true;
+  MCP.call('list_my_tasks', { project: cfg.project, limit: 100 })
+    .then(function(res) {
+      tasks = res.tasks || [];
+      renderBoard();
+      setStatus(tasks.length + ' tasks · project ' + cfg.project, 'ok');
+      setPS(res.providerStatus);
+      document.getElementById('btn-refresh').disabled = false;
+    })
+    .catch(function(e) {
+      setStatus('Error: ' + e.message, 'err');
+      setPS(null);
+    })
+    .then(function() {
+      document.getElementById('btn-load').disabled = false;
+    });
+}
+
+// ── Events ────────────────────────────────────────────────────────────────────
+document.getElementById('btn-load').addEventListener('click', loadTasks);
+document.getElementById('btn-refresh').addEventListener('click', loadTasks);
+document.getElementById('btn-close').addEventListener('click', closeModal);
+document.getElementById('bd').addEventListener('click', function(e) {
+  if (e.target === document.getElementById('bd')) closeModal();
+});
+// Card clicks via event delegation — no inline JS handlers
+document.querySelector('.board').addEventListener('click', function(e) {
+  var card = e.target.closest('.card');
+  if (card) openModal(card.getAttribute('data-sid'));
+});
+var tabEls = document.querySelectorAll('.tab');
+for (var ti = 0; ti < tabEls.length; ti++) {
+  tabEls[ti].addEventListener('click', (function(el) {
+    return function() {
+      if (!mTask) return;
+      setActiveTab(el.getAttribute('data-tab'));
+      renderTab();
+    };
+  })(tabEls[ti]));
+}
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') closeModal();
+});
+
+// ── Boot ──────────────────────────────────────────────────────────────────────
+loadCfg();
+MCP.init().then(function() {
+  if (cfg.project) loadTasks();
+});
+  </script>
+</body>
+</html>
