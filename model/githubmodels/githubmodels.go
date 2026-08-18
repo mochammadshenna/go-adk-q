@@ -84,6 +84,7 @@ import (
 var KnownModels = catalog.ProviderCatalog{
 	Provider: "github-models",
 	Label:    "GitHub Models",
+	EnvVar:   EnvPAT,
 	Models: []catalog.ModelEntry{
 		// ── Meta LLaMA 4 ──────────────────────────────────────────────────
 		{ID: "Llama-4-Maverick-17B-128E-Instruct-FP8", Label: "Llama 4 Maverick 17B (FP8)", Tags: []string{"fast"}, Default: true},

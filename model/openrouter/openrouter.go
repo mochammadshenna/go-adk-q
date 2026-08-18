@@ -63,6 +63,7 @@ import (
 var KnownModels = catalog.ProviderCatalog{
 	Provider: "openrouter",
 	Label:    "OpenRouter",
+	EnvVar:   EnvAPIKey,
 	Models: []catalog.ModelEntry{
 		// ── Default (free tier, supports tool use) ───────────────────────
 		{ID: "meta-llama/llama-3.3-70b-instruct:free", Label: "Llama 3.3 70B (free)", Tags: []string{"free"}, Default: true},

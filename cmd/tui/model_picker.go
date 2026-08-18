@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"strings"
 
+	"go-adk-q/cmd/tui/theme"
 	"go-adk-q/model/catalog"
 
 	"github.com/charmbracelet/lipgloss"
@@ -210,7 +211,7 @@ func (p *modelPickerState) pickerBack() (close bool) {
 // ── Rendering ─────────────────────────────────────────────────────────────────
 
 // pickerView renders the entire picker as a string ready for SetContent.
-func (p *modelPickerState) pickerView(s styledSet, w int) string {
+func (p *modelPickerState) pickerView(s theme.StyledSet, w int) string {
 	switch p.stage {
 	case pickerStageProvider:
 		return p.providerView(s, w)
@@ -220,12 +221,12 @@ func (p *modelPickerState) pickerView(s styledSet, w int) string {
 	return ""
 }
 
-func (p *modelPickerState) providerView(s styledSet, w int) string {
+func (p *modelPickerState) providerView(s theme.StyledSet, w int) string {
 	var sb strings.Builder
 
 	// Title is always "Select Model" per UX spec.
-	title := s.agentLabel.Render("Select Model") +
-		s.system.Render("  esc: cancel  •  ↑/↓: navigate  •  enter: select provider")
+	title := s.AgentLabel.Render("Select Model") +
+		s.System.Render("  esc: cancel  •  ↑/↓: navigate  •  enter: select provider")
 	sb.WriteString(title + "\n\n")
 
 	innerW := w - 4
@@ -237,19 +238,19 @@ func (p *modelPickerState) providerView(s styledSet, w int) string {
 		label := c.Label
 		row := fmt.Sprintf("  %-*s", innerW-2, label)
 		if i == p.providerIdx {
-			sb.WriteString(s.agentLabel.Width(innerW).Render(row))
+			sb.WriteString(s.AgentLabel.Width(innerW).Render(row))
 		} else {
-			sb.WriteString(s.system.Width(innerW).Render(row))
+			sb.WriteString(s.System.Width(innerW).Render(row))
 		}
 		sb.WriteByte('\n')
 	}
 
 	sb.WriteString("\n")
-	sb.WriteString(s.system.Render(fmt.Sprintf("  %d providers available", len(p.providers))))
+	sb.WriteString(s.System.Render(fmt.Sprintf("  %d providers available", len(p.providers))))
 	return sb.String()
 }
 
-func (p *modelPickerState) modelView(s styledSet, w int) string {
+func (p *modelPickerState) modelView(s theme.StyledSet, w int) string {
 	var sb strings.Builder
 
 	prov := p.providers[p.chosenProvider]
@@ -261,8 +262,8 @@ func (p *modelPickerState) modelView(s styledSet, w int) string {
 	}
 
 	// Title is always "Select Model".
-	title := s.agentLabel.Render("Select Model") +
-		s.system.Render(fmt.Sprintf("  %s  •  ↑/↓: navigate  •  enter: switch  •  provider: %s", escHint, prov.Label))
+	title := s.AgentLabel.Render("Select Model") +
+		s.System.Render(fmt.Sprintf("  %s  •  ↑/↓: navigate  •  enter: switch  •  provider: %s", escHint, prov.Label))
 	sb.WriteString(title + "\n\n")
 
 	innerW := w - 4
@@ -301,16 +302,16 @@ func (p *modelPickerState) modelView(s styledSet, w int) string {
 			Render(tags)
 
 		if i == p.modelIdx {
-			sb.WriteString(s.agentLabel.Width(innerW - lipgloss.Width(tagStyled)).Render(content))
+			sb.WriteString(s.AgentLabel.Width(innerW - lipgloss.Width(tagStyled)).Render(content))
 			sb.WriteString(tagStyled)
 		} else {
-			sb.WriteString(s.system.Width(innerW - lipgloss.Width(tagStyled)).Render(content))
+			sb.WriteString(s.System.Width(innerW - lipgloss.Width(tagStyled)).Render(content))
 			sb.WriteString(tagStyled)
 		}
 		sb.WriteByte('\n')
 	}
 
 	sb.WriteString("\n")
-	sb.WriteString(s.system.Render(fmt.Sprintf("  %d models  •  ● = active  •  ○ = default", len(p.models))))
+	sb.WriteString(s.System.Render(fmt.Sprintf("  %d models  •  ● = active  •  ○ = default", len(p.models))))
 	return sb.String()
 }

@@ -68,6 +68,7 @@ import (
 
 	"go-adk-q/model/catalog"
 	"go-adk-q/model/oaibridge"
+
 	"google.golang.org/adk/model"
 )
 
@@ -78,8 +79,46 @@ import (
 var KnownModels = catalog.ProviderCatalog{
 	Provider: "huggingface",
 	Label:    "HuggingFace",
+	EnvVar:   EnvToken,
 	Models: []catalog.ModelEntry{
-		{ID: "mistralai/Mistral-7B-Instruct-v0.3", Label: "Mistral 7B v0.3", Default: true},
+		{ID: "thinkingmachines/Inkling:together", Label: "Inkling Together", Default: true},
+		{ID: "zai-org/GLM-5.2:novita", Label: "GLM 5.2 Novita", Tags: []string{"text-generation"}},
+		{ID: "prism-ml/Ternary-Bonsai-27B-gguf:together", Label: "Ternary Bonsai 27B", Tags: []string{"text-generation"}},
+		// Text Generation
+		{ID: "Qwen/Qwen3-14B:nscale", Label: "Qwen3 14B", Tags: []string{"text-generation"}},
+		{ID: "meta-llama/Llama-3.2-1B", Label: "Llama 3.2 1B", Tags: []string{"text-generation"}},
+		{ID: "zai-org/GLM-4.7-Flash:novita", Label: "GLM 4.7 Flash", Tags: []string{"text-generation", "fast"}},
+		{ID: "Qwen/Qwen3-8B:nscale", Label: "Qwen3 8B", Tags: []string{"text-generation"}},
+		{ID: "DeepHat/DeepHat-V1-7B:featherless-ai", Label: "DeepHat V1 7B", Tags: []string{"text-generation"}},
+		{ID: "nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16:deepinfra", Label: "Nemotron 3 Ultra 550B", Tags: []string{"text-generation"}},
+		{ID: "deepseek-ai/DeepSeek-R1:novita", Label: "DeepSeek R1", Tags: []string{"text-generation", "reasoning"}},
+		{ID: "Qwen/Qwen3-Coder-30B-A3B-Instruct:featherless-ai", Label: "Qwen3 Coder 30B", Tags: []string{"text-generation", "coding"}},
+		{ID: "meta-llama/Llama-3.3-70B-Instruct:groq", Label: "Llama 3.3 70B", Tags: []string{"text-generation"}},
+		{ID: "meta-llama/Llama-3.1-8B", Label: "Llama 3.1 8B", Tags: []string{"text-generation"}},
+		{ID: "Qwen/Qwen3-0.6B:featherless-ai", Label: "Qwen3 0.6B", Tags: []string{"text-generation"}},
+		{ID: "meta-llama/Meta-Llama-3-8B-Instruct:featherless-ai", Label: "Meta Llama 3 8B", Tags: []string{"text-generation"}},
+		{ID: "meta-llama/Llama-3.2-3B-Instruct:featherless-ai", Label: "Llama 3.2 3B", Tags: []string{"text-generation"}},
+		{ID: "zai-org/GLM-5.2-FP8:zai-org", Label: "GLM 5.2 FP8", Tags: []string{"text-generation"}},
+		{ID: "openai/gpt-oss-20b:groq", Label: "GPT-OSS 20B", Tags: []string{"text-generation"}},
+		{ID: "openai/gpt-oss-120b:groq", Label: "GPT-OSS 120B", Tags: []string{"text-generation"}},
+		{ID: "meta-llama/Llama-3.1-8B-Instruct:novita", Label: "Llama 3.1 8B Novita", Tags: []string{"text-generation"}},
+		{ID: "deepreinforce-ai/Ornith-1.0-35B:deepinfra", Label: "Ornith 1.0 35B", Tags: []string{"text-generation"}},
+		{ID: "deepseek-ai/DeepSeek-V4-Flash:novita", Label: "DeepSeek V4 Flash", Tags: []string{"text-generation", "fast"}},
+		{ID: "deepseek-ai/DeepSeek-V4-Pro:novita", Label: "DeepSeek V4 Pro", Tags: []string{"text-generation"}},
+		{ID: "deepreinforce-ai/Ornith-1.0-9B:featherless-ai", Label: "Ornith 1.0 9B", Tags: []string{"text-generation"}},
+		{ID: "empero-ai/Qwythos-9B-Claude-Mythos-5-1M:featherless-ai", Label: "Qwythos 9B", Tags: []string{"text-generation"}},
+		// Image-Text-to-Text
+		{ID: "bottlecapai/ThinkingCap-Qwen3.6-27B:featherless-ai", Label: "ThinkingCap Qwen3.6 27B", Tags: []string{"image-text-to-text"}},
+		{ID: "google/gemma-4-31B-it:novita", Label: "Gemma 4 31B", Tags: []string{"image-text-to-text"}},
+		{ID: "moonshotai/Kimi-K2.7-Code:novita", Label: "Kimi K2.7 Code", Tags: []string{"image-text-to-text", "coding"}},
+		{ID: "Qwen/Qwen3.6-35B-A3B:featherless-ai", Label: "Qwen3.6 35B", Tags: []string{"image-text-to-text"}},
+		{ID: "MiniMaxAI/MiniMax-M3:novita", Label: "MiniMax M3", Tags: []string{"image-text-to-text"}},
+		// Text-to-Image
+		{ID: "krea/Krea-2-Turbo", Label: "Krea 2 Turbo", Tags: []string{"text-to-image"}},
+		{ID: "Tongyi-MAI/Z-Image-Turbo", Label: "Z-Image Turbo", Tags: []string{"text-to-image"}},
+		{ID: "stabilityai/stable-diffusion-xl-base-1.0", Label: "SDXL 1.0", Tags: []string{"text-to-image"}},
+		{ID: "black-forest-labs/FLUX.1-dev", Label: "FLUX.1 dev", Tags: []string{"text-to-image"}},
+		// Existing entries
 		{ID: "NousResearch/Hermes-2-Pro-Llama-3-8B", Label: "Hermes 2 Pro Llama 3 8B"},
 		{ID: "NousResearch/Hermes-2-Pro-Mistral-7B", Label: "Hermes 2 Pro Mistral 7B"},
 		{ID: "microsoft/Phi-3.5-mini-instruct", Label: "Phi-3.5 mini", Tags: []string{"fast"}},
@@ -89,10 +128,10 @@ var KnownModels = catalog.ProviderCatalog{
 const (
 	// DefaultModel is Mistral 7B Instruct v0.3, which reliably supports
 	// function calling via HuggingFace's serverless inference API.
-	DefaultModel = "mistralai/Mistral-7B-Instruct-v0.3"
+	DefaultModel = "thinkingmachines/Inkling:together"
 
 	// serverlessBaseURL is HuggingFace's shared serverless inference endpoint.
-	serverlessBaseURL = "https://api-inference.huggingface.co/v1"
+	serverlessBaseURL = "https://router.huggingface.co/v1"
 
 	serverlessProvider = "huggingface"
 	endpointProvider   = "huggingface-endpoint"

@@ -264,14 +264,23 @@ func (b *llmBridge) Name() string { return b.name }
 
 // GenerateContent satisfies model.LLM.
 //
-// The stream parameter is accepted but currently yields a single complete
-// response regardless of its value. Incremental token streaming would
-// require forwarding the ai.ModelStreamCallback to the ADK event iterator,
-// which is straightforward to add when needed.
+// When stream is true, each incremental delta compat_oai's underlying
+// streaming call reports is forwarded to the ADK iterator immediately as a
+// Partial LLMResponse, then the final fully-aggregated response (built from
+// openai-go's own ChatCompletionAccumulator, so tool-call arguments are never
+// reconstructed from partial JSON fragments here) is yielded once more as the
+// non-partial event. This mirrors ADK's own gemini streaming contract
+// (google.golang.org/adk/internal/llminternal.streamingResponseAggregator):
+// partial events carry only the delta and are for live display; the one
+// final non-partial event carries the complete content and is what the
+// Runner actually processes. cmd/tui/chat.go's streaming consumer already
+// computes a real delta from either shape (cumulative or incremental text),
+// so the redundant final event's full text collapses to a zero-length delta
+// there — no code changes were needed on that side.
 func (b *llmBridge) GenerateContent(
 	ctx context.Context,
 	req *model.LLMRequest,
-	_ bool, // stream — future incremental streaming
+	stream bool,
 ) iter.Seq2[*model.LLMResponse, error] {
 	return func(yield func(*model.LLMResponse, error) bool) {
 		aiReq, err := toAIRequest(req)
@@ -280,12 +289,37 @@ func (b *llmBridge) GenerateContent(
 			return
 		}
 
+		params := &ai.ModelParams{Request: aiReq}
+		if stream {
+			params.Callback = func(_ context.Context, chunk *ai.ModelResponseChunk) error {
+				partial := fromAIResponseChunk(chunk)
+				if partial == nil {
+					return nil
+				}
+				if !yield(partial, nil) {
+					// Consumer stopped pulling (e.g. ctx was already cancelled).
+					// Returning an error aborts compat_oai's streaming loop
+					// instead of paying for tokens nothing will read.
+					return context.Canceled
+				}
+				return nil
+			}
+		}
+
 		// Call the pre-built hook chain. When no Hooks were configured this is
-		// equivalent to b.aiModel.Generate(ctx, aiReq, nil). When hooks are
-		// present (e.g. model/middleware.Fallback) they wrap this call and may
-		// retry with a different Genkit model on failure.
-		resp, err := b.next(ctx, &ai.ModelParams{Request: aiReq})
+		// equivalent to b.aiModel.Generate(ctx, aiReq, params.Callback). When
+		// hooks are present (e.g. model/middleware.Fallback) they wrap this
+		// call and may retry with a different Genkit model on failure.
+		resp, err := b.next(ctx, params)
 		if err != nil {
+			if errors.Is(ctx.Err(), context.Canceled) {
+				// Consumer explicitly cancelled — nothing left to yield to.
+				// A deadline expiry (context.DeadlineExceeded) is NOT the same
+				// thing: the caller is still listening for a per-attempt
+				// timeout, so that case falls through and is yielded below
+				// instead of being silently swallowed.
+				return
+			}
 			yield(nil, fmt.Errorf("oaibridge: generate [%s]: %w", b.name, err))
 			return
 		}
@@ -484,11 +518,14 @@ func genaiConfigToMap(c *genai.GenerateContentConfig) map[string]any {
 
 // fromAIResponse converts a Genkit ModelResponse to an ADK LLMResponse.
 //
-// TurnComplete is always true: the Generate call above is non-streaming and
-// returns only when the model has finished producing its response.
+// TurnComplete is always true: whether the underlying Generate call was
+// streaming or not, this conversion only ever runs on the final, fully
+// aggregated response (Generate itself returns only once the model has
+// finished producing it — see fromAIResponseChunk for the per-delta partial
+// path used while streaming).
 // UsageMetadata is populated from resp.Usage when available so the TUI can
 // display token counts for providers backed by oaibridge (GitHub Models,
-// Groq, NVIDIA, OpenRouter, HuggingFace).
+// Groq, NVIDIA, OpenRouter, HuggingFace, OpenCode).
 func fromAIResponse(resp *ai.ModelResponse) *model.LLMResponse {
 	if resp == nil || resp.Message == nil {
 		return &model.LLMResponse{TurnComplete: true}
@@ -518,6 +555,37 @@ func fromAIResponse(resp *ai.ModelResponse) *model.LLMResponse {
 	}
 
 	return llmResp
+}
+
+// fromAIResponseChunk converts one incremental Genkit streaming chunk
+// (compat_oai's per-SSE-event delta — see generateStream in
+// compat_oai/generate.go) into a Partial ADK LLMResponse.
+//
+// Returns nil when the chunk carries no convertible parts (e.g. a
+// keep-alive-only event with an empty Delta), so the caller can skip
+// yielding anything for it. Unlike fromAIResponse, this never reads
+// resp.Usage — usage totals are only known once the full response has been
+// accumulated, and are attached by the final fromAIResponse call instead.
+func fromAIResponseChunk(chunk *ai.ModelResponseChunk) *model.LLMResponse {
+	if chunk == nil || len(chunk.Content) == 0 {
+		return nil
+	}
+
+	content := &genai.Content{Role: "model"}
+	for _, p := range chunk.Content {
+		gp := aiPartToGenai(p)
+		if gp != nil {
+			content.Parts = append(content.Parts, gp)
+		}
+	}
+	if len(content.Parts) == 0 {
+		return nil
+	}
+
+	return &model.LLMResponse{
+		Content: content,
+		Partial: true,
+	}
 }
 
 // aiPartToGenai converts an *ai.Part back to a *genai.Part.

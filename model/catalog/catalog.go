@@ -56,6 +56,11 @@ type ProviderCatalog struct {
 	// Label is the display name shown in the provider picker (e.g. "GitHub Models").
 	Label string
 
+	// EnvVar is the environment variable that activates this provider (e.g.
+	// "GROQ_API_KEY"). Used by /login to know which variable to set when the
+	// user enters a key for this provider.
+	EnvVar string
+
 	// Models is the ordered list of known models for this provider.
 	// The first entry with Default==true is pre-selected in the picker.
 	Models []ModelEntry

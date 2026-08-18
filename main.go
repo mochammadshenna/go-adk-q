@@ -75,7 +75,6 @@ import (
 	"log"
 	"log/slog"
 	"os"
-	"strings"
 
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 
@@ -90,18 +89,16 @@ import (
 	"google.golang.org/adk/cmd/launcher"
 	"google.golang.org/adk/cmd/launcher/full"
 	"google.golang.org/adk/model"
-	"google.golang.org/adk/model/gemini"
 	"google.golang.org/adk/session"
 	"google.golang.org/adk/telemetry"
 	"google.golang.org/adk/tool"
 	"google.golang.org/adk/tool/agenttool"
+	"google.golang.org/adk/tool/exitlooptool"
 	"google.golang.org/adk/tool/skilltoolset/skill"
 
 	localskilltoolset "go-adk-q/tool/skilltoolset"
 
-	"go-adk-q/model/echo"
-	"go-adk-q/model/failover"
-	"go-adk-q/model/githubmodels"
+	"go-adk-q/model/chain"
 	"go-adk-q/model/groq"
 	"go-adk-q/model/huggingface"
 	"go-adk-q/model/nvidia"
@@ -112,88 +109,43 @@ import (
 func main() {
 	ctx := context.Background()
 
-	// ── 1. Models ─────────────────────────────────────────────────────────────
-	// All provider models are created here, before the agent graph, so they
-	// serve two purposes:
-	//
-	//   (a) Form the failover chain for the primary model m — if Gemini returns
-	//       an error (rate-limit, outage, quota) the next configured provider
-	//       is tried automatically, transparent to every agent that uses m.
-	//
-	//   (b) Power dedicated provider comparison sub-agents (groq_agent, etc.)
-	//       so users can explicitly target a specific provider.
-	//
-	// failover.New filters out nil entries, so it is always safe to pass all
-	// four provider LLMs regardless of which API keys are configured.
-
-	// ── Provider setup ────────────────────────────────────────────────────────
-	// Every provider is optional. The first configured provider becomes primary;
-	// the rest form the automatic fallback chain in priority order:
-	//   GitHub Models → Gemini → Groq → NVIDIA → OpenRouter → HuggingFace → echo (test only)
-	//
-	// If GOOGLE_API_KEY is not set, Gemini is skipped entirely — no wasted
-	// round-trips and no WARN noise.  Set at least one provider key or the
-	// binary exits with a clear error.
-
-	// candidateLLMs collects every configured LLM in priority order.
-	// nil entries are skipped so unconfigured providers cost nothing.
-	var candidateLLMs []model.LLM
-	var err error
-
-	// GitHub Models — highest priority; enabled when GITHUB_PAT is set.
-	// Supports GPT-4o, LLaMA 4, Claude, Gemini, DeepSeek, Mistral and more
-	// via a single GitHub PAT with the "models" permission.
-	// Set GITHUB_MODEL to override the default (gpt-4o).
-	var githubLLM model.LLM
-	if ghCfg := githubmodels.ConfigFromEnv(); ghCfg.PAT != "" {
-		githubLLM, err = githubmodels.NewModel(ctx, ghCfg)
-		mustOK(err, "create githubmodels model")
-		candidateLLMs = append(candidateLLMs, githubLLM)
-	} else {
-		slog.Info("GITHUB_PAT not set — GitHub Models skipped; set it at https://github.com/settings/tokens")
+	// ── 1. Model chain ────────────────────────────────────────────────────────
+	// model/chain.Build is the single source of truth for provider priority
+	// order, PROVIDER_SELECTED handling, the per-attempt timeout, and the 429
+	// rate-limit backoff — shared with the TUI binary (cmd/tui/main.go). This
+	// binary used to hand-roll its own copy of this exact logic and it had
+	// silently drifted from the TUI's (the fallback audit's F4/F5 finding:
+	// this binary omitted OpenCode while the TUI included it). Building both
+	// binaries from the one function makes that class of bug structurally
+	// impossible going forward.
+	m, err := chain.Build(ctx)
+	if err != nil {
+		log.Fatal(err)
 	}
+	slog.Info("model chain", "providers", m.Name())
 
-	// Gemini — optional; enabled when GOOGLE_API_KEY is set.
-	// GOOGLE_MODEL overrides the model name (e.g. set to a bad value to force
-	// failover during testing: GOOGLE_MODEL=gemini-intentionally-broken).
-	if googleKey := os.Getenv("GOOGLE_API_KEY"); googleKey != "" {
-		geminiModelName := os.Getenv("GOOGLE_MODEL")
-		if geminiModelName == "" {
-			// gemini-2.0-flash is stable and available on all AI Studio key tiers.
-			// Upgrade to gemini-2.5-flash via GOOGLE_MODEL if your key supports it.
-			geminiModelName = "gemini-2.0-flash"
-		}
-		geminiModel, geminiErr := gemini.NewModel(ctx, geminiModelName, &genai.ClientConfig{
-			APIKey: googleKey,
-		})
-		mustOK(geminiErr, "create gemini model")
-		candidateLLMs = append(candidateLLMs, geminiModel)
-	} else {
-		slog.Info("GOOGLE_API_KEY not set — Gemini skipped; set it at https://aistudio.google.com/apikey")
-	}
-
-	// Groq — optional; enabled when GROQ_API_KEY is set.
+	// Dedicated single-provider models for the comparison agents below
+	// (groq_agent, nvidia_agent, openrouter_agent, huggingface_agent). These
+	// are deliberately separate from the failover chain above — they exist so
+	// a user can explicitly target one provider instead of going through
+	// automatic failover, so each is only built (not chained) when configured.
 	var groqLLM model.LLM
 	if groqCfg := groq.ConfigFromEnv(); groqCfg.APIKey != "" {
 		groqLLM, err = groq.NewModel(ctx, groqCfg)
 		mustOK(err, "create groq model")
-		candidateLLMs = append(candidateLLMs, groqLLM)
 	}
 
-	// NVIDIA NIM — optional; enabled when NVIDIA_API_KEY is set.
 	var nvidiaLLM model.LLM
 	if nvidiaCfg := nvidia.ConfigFromEnv(); nvidiaCfg.APIKey != "" {
 		nvidiaLLM, err = nvidia.NewModel(ctx, nvidiaCfg)
 		mustOK(err, "create nvidia model")
-		candidateLLMs = append(candidateLLMs, nvidiaLLM)
 	}
 
-	// OpenRouter — optional; enabled when OPENROUTER_API_KEY is set.
-	// Only one model is registered here. Adding more free OpenRouter models
-	// does not help when they share the same upstream provider (e.g. Venice)
-	// which rate-limits by IP/key regardless of model name. Use a different
-	// provider key (GROQ_API_KEY, OPENCODE_API_KEY, GOOGLE_API_KEY) for real
-	// failover resilience.
+	// OpenRouter comparison agent. Only one model is registered here. Adding
+	// more free OpenRouter models does not help when they share the same
+	// upstream provider (e.g. Venice) which rate-limits by IP/key regardless
+	// of model name. Use a different provider key (GROQ_API_KEY,
+	// OPENCODE_API_KEY, GOOGLE_API_KEY) for real failover resilience.
 	var openrouterLLM model.LLM
 	if orCfg := openrouter.ConfigFromEnv(); orCfg.APIKey != "" {
 		if orCfg.SiteURL == "" {
@@ -204,41 +156,13 @@ func main() {
 		}
 		openrouterLLM, err = openrouter.NewModel(ctx, orCfg)
 		mustOK(err, "create openrouter model")
-		candidateLLMs = append(candidateLLMs, openrouterLLM)
 	}
 
-	// HuggingFace — optional; enabled when HF_TOKEN is set.
 	var huggingfaceLLM model.LLM
 	if hfCfg := huggingface.ConfigFromEnv(); hfCfg.Token != "" {
 		huggingfaceLLM, err = huggingface.NewModel(ctx, hfCfg)
 		mustOK(err, "create huggingface model")
-		candidateLLMs = append(candidateLLMs, huggingfaceLLM)
 	}
-
-	// Echo fallback — zero-credential stub, always succeeds.
-	// Activated by ECHO_FALLBACK_ENABLED=1; appended last so it only fires
-	// when every real provider has failed. Never use in production.
-	var echoLLM model.LLM
-	if echo.Enabled() {
-		echoLLM = echo.Default()
-		candidateLLMs = append(candidateLLMs, echoLLM)
-		slog.Warn("echo fallback enabled — for local testing only; not for production")
-	}
-
-	// Require at least one provider.
-	if len(candidateLLMs) == 0 {
-		log.Fatal("no model providers configured — set at least one of: " +
-			"GITHUB_PAT, GOOGLE_API_KEY, GROQ_API_KEY, NVIDIA_API_KEY, OPENROUTER_API_KEY, OPENCODE_API_KEY, HF_TOKEN")
-	}
-
-	// PROVIDER_SELECTED moves the named provider to the front of the chain.
-	// Valid values: github, gemini, groq, nvidia, openrouter, huggingface, echo.
-	// Example: export PROVIDER_SELECTED=openrouter
-	candidateLLMs = applyProviderSelected(candidateLLMs)
-
-	// Build the failover chain: first provider is primary, rest are fallbacks.
-	m := failover.New(candidateLLMs[0], candidateLLMs[1:]...)
-	slog.Info("model chain", "providers", m.Name())
 
 	// Skills toolset — enabled for any provider when ./skills/ dir exists.
 	// skilltoolset uses plain functiontool.New internally with no Gemini
@@ -363,14 +287,22 @@ func main() {
 	})
 	mustOK(err, "create DocDrafter")
 
+	// docExitTool lets QualityChecker actually stop doc_refinement_loop on an
+	// APPROVED verdict, instead of writing "APPROVED" to a state key nothing
+	// reads and silently burning all 3 iterations every time (see
+	// agents/harness_loop.go's critique_loop for the pattern this mirrors).
+	docExitTool, err := exitlooptool.New()
+	mustOK(err, "create doc_exit_loop tool")
+
 	qualityChecker, err := llmagent.New(llmagent.Config{
 		Name:  "QualityChecker",
 		Model: m,
 		Instruction: "You are a technical editor. " +
 			"Evaluate this document:\n{document_draft}\n\n" +
-			"If the quality is publication-ready, respond EXACTLY with: APPROVED\n" +
-			"Otherwise, give ONE specific, actionable improvement suggestion.",
+			"If the quality is publication-ready, call the exit_loop tool and respond EXACTLY with: APPROVED\n" +
+			"Otherwise, do NOT call exit_loop — instead give ONE specific, actionable improvement suggestion.",
 		OutputKey: "quality_verdict",
+		Tools:     []tool.Tool{docExitTool},
 		Toolsets:  agentToolsets,
 	})
 	mustOK(err, "create QualityChecker")
@@ -798,38 +730,4 @@ func mustOK(err error, what string) {
 	if err != nil {
 		log.Fatalf("failed to %s: %v", what, err)
 	}
-}
-
-// applyProviderSelected reads PROVIDER_SELECTED and moves the matching
-// provider to the front of the candidateLLMs slice so it becomes the
-// primary model in the failover chain. All other providers remain as
-// ordered fallbacks.
-//
-// Valid values (case-insensitive):
-//
-//	github, gemini, groq, nvidia, openrouter, huggingface, echo
-//
-// Example:
-//
-//	export PROVIDER_SELECTED=openrouter
-func applyProviderSelected(llms []model.LLM) []model.LLM {
-	sel := strings.ToLower(strings.TrimSpace(os.Getenv("PROVIDER_SELECTED")))
-	if sel == "" || len(llms) <= 1 {
-		return llms
-	}
-	for i, m := range llms {
-		if strings.Contains(strings.ToLower(m.Name()), sel) {
-			if i == 0 {
-				return llms // already first
-			}
-			reordered := make([]model.LLM, 0, len(llms))
-			reordered = append(reordered, llms[i])
-			reordered = append(reordered, llms[:i]...)
-			reordered = append(reordered, llms[i+1:]...)
-			slog.Info("PROVIDER_SELECTED applied", "provider", sel, "model", m.Name())
-			return reordered
-		}
-	}
-	slog.Warn("PROVIDER_SELECTED: no configured provider matched", "value", sel)
-	return llms
 }

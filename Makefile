@@ -59,8 +59,8 @@
 -include .env
 export
 
-BINARY      := go-adk-q
-TUI_BINARY  := tui
+BINARY      := adk-q
+TUI_BINARY  := layar-cli
 GO          := go
 GOFLAGS     ?=
 PKG         := ./...
@@ -158,6 +158,33 @@ build-tui-linux-amd64-cgo: check-zig ## Build TUI binary for linux/amd64 — CGO
 	  -o $(BIN_DIR)/$(TUI_BINARY)-linux-amd64-cgo ./cmd/tui
 	@echo "Built: $(BIN_DIR)/$(TUI_BINARY)-linux-amd64-cgo  [CGO=1, glibc $(ZIG_TARGET_AMD64)]"
 
+# ── Darwin (macOS) local builds ───────────────────────────────────────────────
+
+.PHONY: build-darwin-arm64
+build-darwin-arm64: ## Build main binary for darwin/arm64 (Apple Silicon) — root/adk-q
+	$(GO) build $(GOFLAGS) \
+	  -ldflags="-s -w" \
+	  -o $(BINARY) .
+	@echo "Built: ./$(BINARY)  [darwin/arm64]"
+
+.PHONY: build-tui-darwin-arm64
+build-tui-darwin-arm64: ## Build TUI binary for darwin/arm64 (Apple Silicon) — root/layar-cli
+	$(GO) build $(GOFLAGS) \
+	  -ldflags="-s -w" \
+	  -o $(TUI_BINARY) ./cmd/tui
+	@echo "Built: ./$(TUI_BINARY)  [darwin/arm64]"
+
+.PHONY: build-all-darwin-arm64
+build-all-darwin-arm64: build-darwin-arm64 build-tui-darwin-arm64 ## Build both binaries for darwin/arm64
+
+.PHONY: install
+install: build-all-darwin-arm64 ## Build + install both binaries to ~/.local/bin
+	@mkdir -p $(HOME)/.local/bin
+	rm -f $(HOME)/.local/bin/$(BINARY) $(HOME)/.local/bin/$(TUI_BINARY)
+	install -m 755 $(BINARY) $(HOME)/.local/bin/$(BINARY)
+	install -m 755 $(TUI_BINARY) $(HOME)/.local/bin/$(TUI_BINARY)
+	@echo "✅ Installed to ~/.local/bin/$(BINARY) and ~/.local/bin/$(TUI_BINARY)"
+
 .PHONY: check-zig
 check-zig: ## Verify zig is on PATH (required for CGO cross-compilation targets)
 	@command -v zig >/dev/null 2>&1 || { \
@@ -200,6 +227,10 @@ cgo-info: ## Show CGO env, active CGO packages per platform, and available build
 	@echo "  make build-linux-amd64-cgo         CGO=1     linux/amd64  glibc $(ZIG_TARGET_AMD64) via zig"
 	@echo "  make build-linux-arm64-cgo         CGO=1     linux/arm64  glibc $(ZIG_TARGET_ARM64) via zig (Graviton)"
 	@echo "  make build-tui-linux-amd64-cgo     CGO=1     linux/amd64  TUI, glibc $(ZIG_TARGET_AMD64) via zig"
+	@echo "  make build-darwin-arm64            native    darwin/arm64 main binary in repo root"
+	@echo "  make build-tui-darwin-arm64        native    darwin/arm64 TUI binary in repo root"
+	@echo "  make build-all-darwin-arm64        native    both binaries"
+	@echo "  make install                       native    build + cp to ~/.local/bin"
 
 .PHONY: verify-elf
 verify-elf: ## Run 'file' on built linux binaries; print glibc-check instructions

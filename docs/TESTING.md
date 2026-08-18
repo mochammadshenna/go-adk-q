@@ -870,7 +870,7 @@ Hello!
 What is your name?
 ```
 
-> Expect: "cli-q" or a description of itself; no tool call
+> Expect: "layar-cli" or a description of itself; no tool call
 
 ```
 How are you today?

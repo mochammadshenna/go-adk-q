@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>go-adk-q · Architecture Playground</title>
+<style>
+  :root{
+    --bg:#0b0e14; --panel:#161b27; --panel2:#1c2230; --ink:#e6edf3; --muted:#93a1b5;
+    --line:#263041; --accent:#7aa2f7; --green:#9ece6a; --gold:#e0af68; --rose:#f7768e; --purple:#bb9af7;
+    --mono:"SF Mono",ui-monospace,Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:radial-gradient(1200px 600px at 80% -10%,#1a2233,#0b0e14 55%);color:var(--ink);font-family:var(--sans)}
+  .top{max-width:1280px;margin:0 auto;padding:26px 22px 8px}
+  .kicker{font-family:var(--mono);color:var(--accent);letter-spacing:.18em;font-size:12px;text-transform:uppercase}
+  h1{font-size:26px;margin:8px 0 4px}
+  .sub{color:var(--muted);font-size:14px;max-width:820px}
+  .layout{display:flex;gap:0;max-width:1280px;margin:14px auto 40px;padding:0 14px;align-items:stretch}
+  .canvas-wrap{flex:1;min-width:0;border:1px solid var(--line);border-radius:14px;background:linear-gradient(180deg,#0e121b,#0b0e14);overflow:auto;height:760px}
+  svg{display:block}
+  .side{width:380px;flex:none;margin-left:14px;border:1px solid var(--line);border-radius:14px;background:var(--panel);padding:18px;height:760px;overflow:auto}
+  .side h3{margin:0 0 4px;font-size:18px}
+  .side .file{font-family:var(--mono);font-size:11.5px;color:var(--accent);word-break:break-all;margin-bottom:10px}
+  .side .role{color:var(--muted);font-size:13px;margin-bottom:12px}
+  .sev{font-family:var(--mono);font-size:10.5px;font-weight:700;padding:3px 8px;border-radius:999px;letter-spacing:.05em}
+  .s-crit{background:rgba(247,118,142,.16);color:#f7768e;border:1px solid rgba(247,118,142,.4)}
+  .s-high{background:rgba(255,158,100,.16);color:#ff9e64;border:1px solid rgba(255,158,100,.4)}
+  .s-med{background:rgba(224,175,104,.16);color:#e0af68;border:1px solid rgba(224,175,104,.4)}
+  .s-low{background:rgba(125,207,255,.14);color:#7dcfff;border:1px solid rgba(125,207,255,.4)}
+  .s-ok{background:rgba(158,206,106,.16);color:#9ece6a;border:1px solid rgba(158,206,106,.4)}
+  .finding{background:rgba(122,162,247,.06);border-left:3px solid var(--accent);border-radius:0 10px 10px 0;padding:10px 13px;font-size:13px;margin:12px 0}
+  .node-rect{cursor:pointer;transition:filter .12s}
+  .node-rect:hover{filter:brightness(1.25)}
+  .node-rect.sel rect{stroke-width:3}
+  .node-text{font-family:var(--mono);font-size:12px;fill:#0b0e14;font-weight:700;pointer-events:none}
+  .node-sub{font-family:var(--mono);font-size:9.5px;fill:#0b0e14;opacity:.8;pointer-events:none}
+  .edge{stroke:#33405a;stroke-width:1.5;fill:none}
+  .edge.hot{stroke:var(--accent);stroke-width:2.5}
+  .legend{display:flex;gap:14px;flex-wrap:wrap;margin-top:8px;font-family:var(--mono);font-size:11px;color:var(--muted)}
+  .dot{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:middle}
+  /* comments */
+  .cmt-head{display:flex;justify-content:space-between;align-items:center;margin-top:6px}
+  .cmt-head b{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;font-family:var(--mono)}
+  .thread{margin:8px 0;display:flex;flex-direction:column;gap:8px}
+  .cmt{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:9px 11px;font-size:12.5px}
+  .cmt .meta{font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:4px}
+  .cmt .del{float:right;color:var(--rose);cursor:pointer;font-family:var(--mono);font-size:10px}
+  textarea{width:100%;background:#0c0f17;border:1px solid var(--line);border-radius:10px;color:var(--ink);font-family:var(--sans);font-size:13px;padding:9px;resize:vertical;min-height:58px}
+  .btn{margin-top:8px;background:var(--accent);color:#0b0e14;border:0;border-radius:9px;padding:8px 13px;font-weight:700;cursor:pointer;font-size:13px}
+  .btn.ghost{background:transparent;color:var(--muted);border:1px solid var(--line)}
+  .empty{color:var(--muted);font-size:13px;font-style:italic;margin:10px 0}
+  .hint{font-size:11.5px;color:var(--muted);margin-top:10px}
+  .bar{display:flex;gap:8px;margin-top:10px}
+</style>
+</head>
+<body>
+
+<div class="top">
+  <div class="kicker">Architecture Playground</div>
+  <h1>go-adk-q · Content-Generator Agent Pipeline</h1>
+  <p class="sub">Click any node to inspect its role, the exact source file, and the attached audit finding. Ask questions or leave edits inline — comments persist in <code>localStorage</code> on this browser. Nothing leaves your machine.</p>
+  <div class="legend">
+    <span><span class="dot" style="background:#7aa2f7"></span>UI / Frontend</span>
+    <span><span class="dot" style="background:#bb9af7"></span>ADK Core</span>
+    <span><span class="dot" style="background:#9ece6a"></span>Model Layer</span>
+    <span><span class="dot" style="background:#e0af68"></span>Provider</span>
+    <span><span class="dot" style="background:#f7768e"></span>Test / Fallback</span>
+  </div>
+</div>
+
+<div class="layout">
+  <div class="canvas-wrap">
+    <svg id="svg" width="1540" height="980"></svg>
+  </div>
+
+  <div class="side" id="side">
+    <div id="detail">
+      <h3>Select a node</h3>
+      <p class="role">The graph shows the live request path: <b>Terminal UI → chatModel → ADK Runner → cli-q Agent → Failover Model → oaibridge → Providers</b>, with Tools, Skills, Auditor and the ACP bridge attached. Click a node to drill in.</p>
+      <div class="hint">Tip: every node has a comment thread. Use it to ask questions or propose edits for the implementation agents driving this codebase.</div>
+    </div>
+  </div>
+</div>
+
+<script>
+const NODES = [
+  {id:"tui",   x:40,  y:430, c:"#7aa2f7", label:"Terminal UI", sub:"Bubbletea", role:"The interactive terminal surface — themes, markdown, streaming, slash commands, file-attach, ACP bridge.", file:"cmd/tui/chat.go (2,721 lines) + markdown/slash/model_picker/settings/acp_server", sev:"ok", sevLabel:"OK", finding:"Already excellent. 8 themes, model picker, @file autocomplete, ACP server, session save. We extended it rather than rewriting it."},
+  {id:"chat",  x:250, y:380, c:"#7aa2f7", label:"chatModel", sub:"state + render", role:"Owns viewport, textarea, spinner, token counts, streaming chunks, route badge. The Bubbletea root model.", file:"cmd/tui/chat.go", sev:"low", sevLabel:"LOW", finding:"NEW: now holds the live *failover.Model and renders a per-turn route badge (⚡/🔀). Surfaces resilience that was previously invisible."},
+  {id:"acp",   x:250, y:600, c:"#7aa2f7", label:"ACP Server", sub:"IDE bridge", role:"Agent Client Protocol server — exposes message/send + message/stream over HTTP to IDEs.", file:"cmd/tui/acp_server.go", sev:"ok", sevLabel:"OK", finding:"Clean separation: runAgentSync drives the same runner synchronously so HTTP handlers need no Bubbletea loop."},
+  {id:"runner",x:460, y:430, c:"#bb9af7", label:"ADK Runner", sub:"orchestration", role:"Drives the agent event loop; wires session, memory, artifact services; calls model.GenerateContent.", file:"google.golang.org/adk/runner", sev:"ok", sevLabel:"OK", finding:"Provider-agnostic. No provider logic leaks here — correct layering."},
+  {id:"agent", x:670, y:430, c:"#bb9af7", label:"cli-q Agent", sub:"LlmAgent", role:"The 'content generator' brain. System prompt routes to skills/tools; streams responses.", file:"main.go / cmd/tui/main.go (buildRunner)", sev:"ok", sevLabel:"OK", finding:"Tools + skills enabled for any provider; memory/auditor gated on GOOGLE_API_KEY (multi-step tool chains need Gemini)."},
+  {id:"skill", x:670, y:180, c:"#bb9af7", label:"SkillToolset", sub:"skills/*", role:"Discovers SKILL.md files and injects specialised instructions (code review, docs, debugging…).", file:"tool/skilltoolset + skills/", sev:"low", sevLabel:"LOW", finding:"Schema-patched wrapper (list_skills/load_skill) required for OpenAI-compat APIs. Skills are local & trusted today; sandbox if they become remote (F15)."},
+  {id:"ftools",x:670, y:650, c:"#bb9af7", label:"FunctionTools", sub:"weather/time/calc", role:"Typed FunctionTools following the project's mandatory pattern (args struct + jsonschema tags).", file:"tools/", sev:"ok", sevLabel:"OK", finding:"Pattern is consistent and correct across the codebase."},
+  {id:"audit", x:670, y:840, c:"#bb9af7", label:"LLM Auditor", sub:"agenttool", role:"Critic→reviser fact-check pipeline, delegated via agenttool. Gemini-only.", file:"agents/llmauditor.go", sev:"low", sevLabel:"LOW", finding:"Disabled unless GOOGLE_API_KEY set. Heavy multi-step chain — correctly excluded from fragile providers."},
+  {id:"fail",  x:900, y:430, c:"#9ece6a", label:"Failover Model", sub:"buffered chain", role:"Tries providers in priority order; buffers each full response; returns first success. THE safety net.", file:"model/failover/failover.go", sev:"high", sevLabel:"HIGH", finding:"Core is sound. FIXED: added per-attempt 90s timeout (was hangable) + Stats()/Names() observability. Still retries only on hard errors (F6: add response validation)."},
+  {id:"bridge",x:1120,y:430, c:"#9ece6a", label:"oaibridge", sub:"Genkit boundary", role:"The ONLY package allowed to import firebase/genkit. Maps ADK↔Genkit types; calls providers.", file:"model/oaibridge/bridge.go", sev:"ok", sevLabel:"OK", finding:"Boundary correctly enforced — no provider leaks Genkit types. Note: ignores the stream flag, so true streaming is disabled by design (F7)."},
+  {id:"gh",    x:1340,y:70,  c:"#e0af68", label:"GitHub Models", sub:"gpt-4o etc", role:"Highest-priority provider via a single GitHub PAT.", file:"model/githubmodels", sev:"ok", sevLabel:"OK", finding:"First in the canonical priority order."},
+  {id:"gem",   x:1340,y:180, c:"#e0af68", label:"Gemini", sub:"2.0/2.5 flash", role:"Google Gemini provider.", file:"adk/model/gemini", sev:"ok", sevLabel:"OK", finding:"Default primary when configured."},
+  {id:"groq",  x:1340,y:290, c:"#e0af68", label:"Groq", sub:"LPU", role:"Fast inference provider.", file:"model/groq", sev:"low", sevLabel:"LOW", finding:"Single-tool-only fragility documented; kept as fallback, not primary for complex chains."},
+  {id:"nv",    x:1340,y:400, c:"#e0af68", label:"NVIDIA NIM", sub:"minimax etc", role:"Self-hostable NIM endpoint.", file:"model/nvidia", sev:"low", sevLabel:"LOW", finding:"Supports optional NVIDIA_BASE_URL for on-prem."},
+  {id:"or",    x:1340,y:510, c:"#e0af68", label:"OpenRouter", sub:"200+ models", role:"Meta-provider; one key, many models.", file:"model/openrouter", sev:"med", sevLabel:"MED", finding:"Shares upstream with free models → rate-limits by key; not a real second redundancy vs same upstream."},
+  {id:"oc",    x:1340,y:620, c:"#e0af68", label:"OpenCode", sub:"zen/v1", role:"Free-tier models via opencode.ai.", file:"model/opencode", sev:"med", sevLabel:"MED", finding:"FIXED: was missing from root main.go's chain (divergence F4). Now present in both binaries."},
+  {id:"hf",    x:1340,y:730, c:"#e0af68", label:"HuggingFace", sub:"serverless", role:"HF Inference provider.", file:"model/huggingface", sev:"low", sevLabel:"LOW", finding:"Silent JSON mangling on complex calls — gated out of primary tool chains."},
+  {id:"echo",  x:1340,y:840, c:"#f7768e", label:"echo", sub:"test only", role:"Zero-credential last-resort stub. Appended last only when ECHO_FALLBACK_ENABLED=1.", file:"model/echo", sev:"ok", sevLabel:"OK", finding:"Correctly never in production. Used to prove the chain end-to-end without API keys."},
+];
+
+const EDGES = [
+  ["tui","chat"],["chat","runner"],["acp","runner"],["runner","agent"],
+  ["skill","agent"],["ftools","agent"],["audit","agent"],["agent","fail"],
+  ["fail","bridge"],
+  ["bridge","gh"],["bridge","gem"],["bridge","groq"],["bridge","nv"],
+  ["bridge","or"],["bridge","oc"],["bridge","hf"],["bridge","echo"],
+];
+
+const NW=172, NH=56;
+const svg=document.getElementById("svg");
+const NS="http://www.w3.org/2000/svg";
+function el(t,a){const e=document.createElementNS(NS,t);for(const k in a)e.setAttribute(k,a[k]);return e;}
+
+// edges first (under nodes)
+EDGES.forEach(([a,b])=>{
+  const A=NODES.find(n=>n.id===a), B=NODES.find(n=>n.id===b);
+  const x1=A.x+NW, y1=A.y+NH/2, x2=B.x, y2=B.y+NH/2;
+  const path=el("path",{d:`M${x1},${y1} C${(x1+x2)/2},${y1} ${(x1+x2)/2},${y2} ${x2},${y2}`,class:"edge",id:"e_"+a+"_"+b});
+  svg.appendChild(path);
+});
+
+// nodes
+NODES.forEach(n=>{
+  const g=el("g",{class:"node-rect",id:"n_"+n.id});
+  g.appendChild(el("rect",{x:n.x,y:n.y,width:NW,height:NH,rx:11,ry:11,fill:n.c,stroke:"#0b0e14",'stroke-width':1.5}));
+  const t=el("text",{x:n.x+NW/2,y:n.y+23,'text-anchor':"middle",class:"node-text"});t.textContent=n.label;
+  const s=el("text",{x:n.x+NW/2,y:n.y+40,'text-anchor':"middle",class:"node-sub"});s.textContent=n.sub;
+  g.appendChild(t);g.appendChild(s);
+  g.addEventListener("click",()=>select(n.id));
+  svg.appendChild(g);
+});
+
+// ---- side panel + comments ----
+const detail=document.getElementById("detail");
+function load(id){try{return JSON.parse(localStorage.getItem("pg_"+id)||"[]")}catch(e){return[]}}
+function save(id,arr){localStorage.setItem("pg_"+id,JSON.stringify(arr))}
+
+function select(id){
+  document.querySelectorAll(".node-rect").forEach(g=>g.classList.remove("sel"));
+  document.getElementById("n_"+id).classList.add("sel");
+  // hot edges
+  document.querySelectorAll(".edge").forEach(e=>e.classList.remove("hot"));
+  EDGES.forEach(([a,b])=>{if(a===id||b===id)document.getElementById("e_"+a+"_"+b).classList.add("hot")});
+
+  const n=NODES.find(x=>x.id===id);
+  const cmts=load(id);
+  const thread = cmts.length ? cmts.map((c,i)=>
+    `<div class="cmt"><span class="del" data-i="${i}">✕</span>${esc(c.text)}<div class="meta">${c.by||"you"} · ${new Date(c.ts).toLocaleString()}</div></div>`
+  ).join("") : `<div class="empty">No comments yet. Be the first to ask a question or propose an edit.</div>`;
+
+  detail.innerHTML = `
+    <span class="sev s-${n.sev}">${n.sevLabel}</span>
+    <h3 style="margin-top:8px">${n.label}</h3>
+    <div class="file">${n.file}</div>
+    <div class="role">${n.role}</div>
+    <div class="finding"><b>Audit note:</b> ${n.finding}</div>
+    <div class="cmt-head"><b>Discussion (${cmts.length})</b></div>
+    <div class="thread" id="thread">${thread}</div>
+    <textarea id="ta" placeholder="Ask a question or propose an edit for this node…"></textarea>
+    <div class="bar">
+      <button class="btn" id="add">Add comment</button>
+      <button class="btn ghost" id="exp">Export all</button>
+    </div>
+    <div class="hint">Comments are saved in this browser via localStorage under the key <code>pg_${id}</code>.</div>`;
+
+  document.getElementById("add").onclick=()=>{
+    const v=document.getElementById("ta").value.trim(); if(!v)return;
+    const arr=load(id); arr.push({text:v,by:"you",ts:Date.now()}); save(id,arr); select(id);
+  };
+  document.getElementById("exp").onclick=exportAll;
+  detail.querySelectorAll(".del").forEach(d=>d.onclick=()=>{
+    const arr=load(id); arr.splice(+d.dataset.i,1); save(id,arr); select(id);
+  });
+}
+function esc(s){return s.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}
+
+function exportAll(){
+  const out={};
+  NODES.forEach(n=>{const a=load(n.id); if(a.length)out[n.id]={label:n.label,comments:a};});
+  const blob=new Blob([JSON.stringify(out,null,2)],{type:"application/json"});
+  const u=URL.createObjectURL(blob); const a=document.createElement("a");
+  a.href=u;a.download="go-adk-q-playground-comments.json";a.click();URL.revokeObjectURL(u);
+}
+
+// open the failover node by default (the headline)
+select("fail");
+</script>
+</body>
+</html>

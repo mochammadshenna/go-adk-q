@@ -4,16 +4,20 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/bubbles/textarea"
+	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/lipgloss"
 
+	"go-adk-q/cmd/tui/layout"
+	"go-adk-q/cmd/tui/theme"
 	"go-adk-q/model/catalog"
 )
 
-// makeTestStyles returns a styledSet for theme index 0 (Catppuccin) for use
+// makeTestStyles returns a theme.StyledSet for theme index 0 (Catppuccin) for use
 // in tests.  themeIdx is set explicitly so glamourStyleName resolves correctly.
-func makeTestStyles(themeIdx int) styledSet {
-	s := makeStyles(builtinThemes[themeIdx])
-	s.themeIdx = themeIdx
+func makeTestStyles(themeIdx int) theme.StyledSet {
+	s := theme.MakeStyles(theme.BuiltinThemes[themeIdx])
+	s.ThemeIdx = themeIdx
 	return s
 }
 
@@ -37,11 +41,11 @@ func TestRenderMarkdownNonEmpty(t *testing.T) {
 		{"mixed", "## Title\n\nSome **bold** text.\n\n```go\nfmt.Println(\"hi\")\n```"},
 	}
 
-	for themeIdx := range builtinThemes {
+	for themeIdx := range theme.BuiltinThemes {
 		s := makeTestStyles(themeIdx)
 		base := testBaseStyle()
 		for _, tc := range inputs {
-			t.Run(builtinThemes[themeIdx].name+"/"+tc.name, func(t *testing.T) {
+			t.Run(theme.BuiltinThemes[themeIdx].Name+"/"+tc.name, func(t *testing.T) {
 				out := renderMarkdown(s, tc.md, 80, base)
 				if strings.TrimSpace(out) == "" {
 					t.Errorf("renderMarkdown(%q, theme=%d): got empty output", tc.md, themeIdx)
@@ -176,12 +180,57 @@ func TestRenderMarkdownContainsANSI(t *testing.T) {
 	md := "## Heading\n\nSome **bold** text and `inline code`.\n\n```go\nfmt.Println(\"hi\")\n```\n"
 	base := testBaseStyle()
 
-	for themeIdx := range builtinThemes {
+	for themeIdx := range theme.BuiltinThemes {
 		s := makeTestStyles(themeIdx)
 		out := renderMarkdown(s, md, 80, base)
 		if !strings.ContainsRune(out, '\x1b') {
 			t.Errorf("theme %d (%s): renderMarkdown produced no ANSI escape codes — check glamour config",
-				themeIdx, builtinThemes[themeIdx].name)
+				themeIdx, theme.BuiltinThemes[themeIdx].Name)
+		}
+	}
+}
+
+// TestRenderMarkdownFencedMarkdownRendersAsHeading is the regression test for
+// the bug documented in SESSION_HANDOFF.md: an LLM wrapping a whole markdown
+// document in a ```md/```markdown fence must have block-level markdown
+// (headings, lists, bold) actually rendered through glamour — not boxed as
+// Chroma-highlighted code — because Chroma's markdown lexer only does inline
+// tokenization, not block-level rendering.
+//
+// Note: this codebase's own glamour style config deliberately keeps the
+// literal "## " prefix on real headings too (see H2.Prefix in
+// glamourStyleConfig), so "no literal ##" is NOT the right signal — a
+// correctly-rendered fenced heading looks the same as a normal heading,
+// hash prefix included. The actual bug signal is *which renderer* handles
+// the segment: this asserts the fenced version renders identically to the
+// same content as plain (unfenced) prose, and differently from what the
+// old Chroma code-block path would have produced.
+func TestRenderMarkdownFencedMarkdownRendersAsHeading(t *testing.T) {
+	base := testBaseStyle()
+	langs := []string{"md", "markdown"}
+	body := "## Heading\n\nSome prose."
+
+	for _, lang := range langs {
+		for themeIdx := range theme.BuiltinThemes {
+			s := makeTestStyles(themeIdx)
+
+			fenced := "```" + lang + "\n" + body + "\n```"
+			gotFenced := renderMarkdown(s, fenced, 80, base)
+			wantProse := renderMarkdown(s, body, 80, base)
+			gotOldCodeBlockPath := renderCodeBlock(s, lang, body, 80)
+
+			if gotFenced != wantProse {
+				t.Errorf("lang=%s theme=%s: fenced markdown did not render like plain prose (still routed through renderCodeBlock?)\ngot:  %q\nwant: %q",
+					lang, theme.BuiltinThemes[themeIdx].Name, gotFenced, wantProse)
+			}
+			if gotFenced == gotOldCodeBlockPath {
+				t.Errorf("lang=%s theme=%s: fenced markdown matches the old Chroma code-block rendering — routing fix did not take effect",
+					lang, theme.BuiltinThemes[themeIdx].Name)
+			}
+			if !strings.Contains(stripANSI(gotFenced), "Heading") {
+				t.Errorf("lang=%s theme=%s: expected heading text 'Heading' in output, got:\n%s",
+					lang, theme.BuiltinThemes[themeIdx].Name, stripANSI(gotFenced))
+			}
 		}
 	}
 }
@@ -305,7 +354,7 @@ func TestActiveModelIdxIn(t *testing.T) {
 // Layout constants (must stay in sync with chat.go):
 //
 //	SetWidth(terminalWidth - 6)  →  internal text width = terminalWidth - 8
-//	calcInputHeight(text, terminalWidth-8, maxH)
+//	layout.CalcInputHeight(text, terminalWidth-8, maxH)
 func TestCalcInputHeight(t *testing.T) {
 	const termW = 160
 	const effectiveW = termW - 6 // = 154 (no prompt; SetWidth(termW-6), prompt="")
@@ -325,10 +374,60 @@ func TestCalcInputHeight(t *testing.T) {
 		{"capped at maxH=5", strings.Repeat("x", effectiveW*10), 5},
 	}
 	for _, tc := range cases {
-		got := calcInputHeight(tc.text, effectiveW, 5)
+		got := layout.CalcInputHeight(tc.text, effectiveW, 5)
 		if got != tc.wantH {
-			t.Errorf("%s: calcInputHeight(%d chars, %d) = %d, want %d",
+			t.Errorf("%s: layout.CalcInputHeight(%d chars, %d) = %d, want %d",
 				tc.desc, len(tc.text), effectiveW, got, tc.wantH)
 		}
 	}
+}
+
+// newFooterTestModel builds a minimal chatModel sufficient to exercise
+// footerView without a real runner/session (neither is read by footerView).
+func newFooterTestModel(modelName, routeProvider string, fellBack bool) chatModel {
+	ti := textarea.New()
+	return chatModel{
+		textInput:     ti,
+		viewport:      viewport.New(80, 24),
+		width:         120,
+		modelName:     modelName,
+		routeProvider: routeProvider,
+		routeFellBack: fellBack,
+	}
+}
+
+// TestFooterViewRouteProviderBadge guards against the footer showing the
+// same provider name twice (e.g. "opencode/deepseek-v4-flash-free ...
+// ⚡ opencode/deepseek-v4-flash-free") when the route provider that served
+// the turn is the same as the configured/displayed model — the common
+// no-failover case. It also confirms a genuinely different fallback
+// provider name still renders.
+func TestFooterViewRouteProviderBadge(t *testing.T) {
+	s := makeTestStyles(0)
+
+	t.Run("no fallback: provider name shown once, not duplicated", func(t *testing.T) {
+		m := newFooterTestModel("opencode/deepseek-v4-flash-free", "opencode/deepseek-v4-flash-free", false)
+		got := m.footerView(s)
+		count := strings.Count(got, "opencode/deepseek-v4-flash-free")
+		if count != 1 {
+			t.Errorf("footer contains provider name %d times, want 1 (no duplicate); footer:\n%s", count, got)
+		}
+		if !strings.Contains(got, "⚡") {
+			t.Errorf("footer missing direct-serve icon ⚡; footer:\n%s", got)
+		}
+	})
+
+	t.Run("fell back: differing provider name still shown", func(t *testing.T) {
+		m := newFooterTestModel("opencode/deepseek-v4-flash-free", "groq/llama-3.3-70b", true)
+		got := m.footerView(s)
+		if !strings.Contains(got, "opencode/deepseek-v4-flash-free") {
+			t.Errorf("footer missing configured model name; footer:\n%s", got)
+		}
+		if !strings.Contains(got, "groq/llama-3.3-70b") {
+			t.Errorf("footer missing fallback provider name; footer:\n%s", got)
+		}
+		if !strings.Contains(got, "🔀") {
+			t.Errorf("footer missing fallback icon 🔀; footer:\n%s", got)
+		}
+	})
 }

@@ -62,6 +62,7 @@ import (
 var KnownModels = catalog.ProviderCatalog{
 	Provider: "nvidia",
 	Label:    "NVIDIA NIM",
+	EnvVar:   EnvAPIKey,
 	Models: []catalog.ModelEntry{
 		{ID: "minimaxai/minimax-m1", Label: "MiniMax M1", Default: true},
 		{ID: "nvidia/llama-3.1-nemotron-70b-instruct", Label: "Nemotron 70B", Tags: []string{"reasoning"}},

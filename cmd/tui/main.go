@@ -12,9 +12,14 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
+	"time"
+
+	localskilltoolset "go-adk-q/tool/skilltoolset"
 
 	"github.com/spf13/cobra"
 	"google.golang.org/adk/agent"
@@ -22,7 +27,6 @@ import (
 	"google.golang.org/adk/artifact"
 	"google.golang.org/adk/memory"
 	"google.golang.org/adk/model"
-	"google.golang.org/adk/model/gemini"
 	"google.golang.org/adk/runner"
 	"google.golang.org/adk/session"
 	"google.golang.org/adk/tool"
@@ -31,12 +35,11 @@ import (
 	"google.golang.org/adk/tool/loadmemorytool"
 	"google.golang.org/adk/tool/preloadmemorytool"
 	"google.golang.org/adk/tool/skilltoolset/skill"
-	localskilltoolset "go-adk-q/tool/skilltoolset"
 	"google.golang.org/genai"
 
 	"go-adk-q/agents"
 	"go-adk-q/model/catalog"
-	"go-adk-q/model/echo"
+	"go-adk-q/model/chain"
 	"go-adk-q/model/failover"
 	"go-adk-q/model/githubmodels"
 	"go-adk-q/model/groq"
@@ -66,6 +69,7 @@ func init() {
 	catalog.Register(catalog.ProviderCatalog{
 		Provider: "gemini",
 		Label:    "Google Gemini",
+		EnvVar:   "GOOGLE_API_KEY",
 		Models: []catalog.ModelEntry{
 			{ID: "gemini-2.0-flash", Label: "Gemini 2.0 Flash", Tags: []string{"fast"}, Default: true},
 			{ID: "gemini-2.5-flash", Label: "Gemini 2.5 Flash", Tags: []string{"fast"}},
@@ -82,6 +86,7 @@ func init() {
 }
 
 func main() {
+	loadCredentialsIntoEnv()
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -89,8 +94,16 @@ func main() {
 }
 
 var rootCmd = &cobra.Command{
-	Use:   "tui",
+	Use:   "layar-cli",
 	Short: "Bubbletea/Lipgloss TUI for the go-adk-q ADK reference",
+	// SilenceUsage: a config/runtime error (e.g. "no model providers
+	// configured") is not a flag-parsing mistake — dumping the full
+	// command-list usage block on top of it buries the one actionable line.
+	// SilenceErrors: main() already prints the returned error to stderr;
+	// without this cobra would print it a second time via its own default
+	// error handler.
+	SilenceUsage:  true,
+	SilenceErrors: true,
 	Long: `A terminal chat UI powered by Bubbletea and Lipgloss.
 
 Talks to the same multi-provider ADK agent as 'go run . console', but
@@ -101,6 +114,13 @@ Environment variables (same as the main binary):
   GOOGLE_API_KEY, GROQ_API_KEY, NVIDIA_API_KEY, OPENROUTER_API_KEY, HF_TOKEN
 
 Set at least one to start.`,
+	// Bare 'layar-cli' (no subcommand) launches the chat UI directly — matches
+	// opencode-ai/opencode's root command, which also runs its TUI from a RunE
+	// set directly on the root rather than requiring a 'chat' subcommand.
+	// 'layar-cli chat' still works too (same RunE, kept for explicitness/scripts).
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return chatCmd.RunE(cmd, args)
+	},
 }
 
 var chatCmd = &cobra.Command{
@@ -108,11 +128,11 @@ var chatCmd = &cobra.Command{
 	Short: "Start the interactive terminal chat UI",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
-		r, sessionSvc, memorySvc, modelName, err := buildRunner(ctx)
+		r, sessionSvc, memorySvc, fm, modelName, err := buildRunner(ctx)
 		if err != nil {
-			return fmt.Errorf("setup: %w", err)
+			return err // buildRunner already wraps this with "setup: "
 		}
-		return runChat(r, sessionSvc, memorySvc, modelName)
+		return runChat(r, sessionSvc, memorySvc, modelName, fm)
 	},
 }
 
@@ -122,168 +142,124 @@ var runCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
-		r, _, _, _, err := buildRunner(ctx)
+		r, _, _, _, _, err := buildRunner(ctx)
 		if err != nil {
-			return fmt.Errorf("setup: %w", err)
+			return err // buildRunner already wraps this with "setup: "
 		}
 		return runOnce(ctx, r, args[0])
+	},
+}
+
+var acpCmd = &cobra.Command{
+	Use:   "acp",
+	Short: "Run as a real ACP agent over stdio (spec-conformant transport)",
+	Long: `Runs go-adk-q as an Agent Client Protocol agent communicating over
+stdin/stdout with newline-delimited JSON-RPC 2.0, per
+https://agentclientprotocol.com/protocol/v1/transports.md. This is the
+transport ACP-compliant clients (e.g. Zed) actually launch agents with —
+the HTTP server started by '/acp' inside the interactive chat UI is a
+non-spec convenience (ACP's only HTTP option, "Streamable HTTP", is itself
+still "in discussion, draft proposal in progress" per the same spec page).
+
+Do not run this manually in an interactive terminal: it expects to be
+launched as a subprocess by an ACP client, which owns stdin/stdout for the
+lifetime of the connection.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := cmd.Context()
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		r, _, _, _, _, err := buildRunner(ctx)
+		if err != nil {
+			return err // buildRunner already wraps this with "setup: "
+		}
+
+		// stdout is the wire protocol itself here — every diagnostic must go
+		// to the same log file the interactive TUI uses, never to stderr or
+		// stdout, matching the spec's "MAY write to stderr for logging" (we
+		// go one step further and avoid stderr too, keeping it free for the
+		// client to display raw if it chooses).
+		logPath := filepath.Join(os.TempDir(), "go-adk-q-tui.log")
+		if lf, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600); err == nil {
+			slog.SetDefault(slog.New(slog.NewTextHandler(lf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+			log.SetOutput(lf)
+			defer lf.Close()
+		}
+
+		// stdio is referenced by bridge below before it's assigned — safe
+		// because bridge is only ever invoked once stdio.Serve is running,
+		// by which point stdio is non-nil. Same forward-reference pattern as
+		// acp_stdio_test.go's TestACPStdio_EOFWhileOutboundRequestInFlight_UnblocksViaDone.
+		var stdio *acpStdio
+		bridge := func(ctx context.Context, input string) (string, error) {
+			ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
+			defer cancel()
+			// Unlike the HTTP-only /acp server (runAgentSync, chat.go), the
+			// real stdio transport CAN service an Agent→Client
+			// session/request_permission round trip mid-turn, so
+			// exec_command's confirmation gate (tools/exec.go) is wired
+			// straight through to the ACP client instead of failing.
+			onConfirm := func(ctx context.Context, toolCallID, toolName string, args map[string]any) (bool, error) {
+				title := "Run " + toolName
+				if cmd, ok := args["command"].(string); ok && cmd != "" {
+					title = "Run: " + cmd
+				}
+				outcome, err := stdio.requestPermission(ctx, "acp-session", toolCallUpdate{
+					ToolCallID: toolCallID,
+					Kind:       "execute",
+					Title:      title,
+				}, []permissionOption{
+					{OptionID: "allow", Name: "Allow", Kind: "allow_once"},
+					{OptionID: "reject", Name: "Reject", Kind: "reject_once"},
+				})
+				if err != nil {
+					return false, err
+				}
+				return outcome.Outcome == "selected" && outcome.OptionID == "allow", nil
+			}
+			text, _, _, err := runTurnWithConfirmations(ctx, r, "acp-user", "acp-session", input, nil, onConfirm)
+			return strings.TrimSpace(text), err
+		}
+		srv := newACPServer(bridge)
+		stdio = newACPStdio(srv)
+		return stdio.Serve(ctx, os.Stdin, os.Stdout)
 	},
 }
 
 func init() {
 	rootCmd.AddCommand(chatCmd)
 	rootCmd.AddCommand(runCmd)
-}
-
-// applyProviderSelected reads PROVIDER_SELECTED and moves the matching
-// provider to the front of the candidateLLMs slice so it becomes the
-// primary model in the failover chain. All other providers remain as
-// ordered fallbacks.
-//
-// Valid values (case-insensitive):
-//
-//	github, gemini, groq, nvidia, openrouter, opencode, huggingface, echo
-//
-// Example:
-//
-//	export PROVIDER_SELECTED=opencode
-func applyProviderSelected(llms []model.LLM) []model.LLM {
-	sel := strings.ToLower(strings.TrimSpace(os.Getenv("PROVIDER_SELECTED")))
-	if sel == "" || len(llms) <= 1 {
-		return llms
-	}
-	for i, m := range llms {
-		if strings.Contains(strings.ToLower(m.Name()), sel) {
-			if i == 0 {
-				return llms // already first
-			}
-			reordered := make([]model.LLM, 0, len(llms))
-			reordered = append(reordered, llms[i])
-			reordered = append(reordered, llms[:i]...)
-			reordered = append(reordered, llms[i+1:]...)
-			slog.Info("PROVIDER_SELECTED applied", "provider", sel, "model", m.Name())
-			return reordered
-		}
-	}
-	slog.Warn("PROVIDER_SELECTED: no configured provider matched", "value", sel)
-	return llms
+	rootCmd.AddCommand(acpCmd)
 }
 
 // buildRunner constructs the failover model chain, a root agent with tools,
 // and returns an ADK runner ready to use alongside the session and memory
 // services needed by the TUI.
 //
-// The model chain is built from environment variables in priority order:
-// Gemini → Groq → NVIDIA → OpenRouter → HuggingFace → echo (test only).
-// At least one provider must be configured or buildRunner returns an error.
+// The provider chain is built by the shared chain package — the single source
+// of truth for provider priority (used by both binaries). This guarantees the
+// TUI and the root binary expose the identical provider set, and that
+// PROVIDER_SELECTED still re-orders the chain.
+//
+// chain.Build applies a per-attempt timeout (90s default) so a hung provider
+// cannot block the whole request and defeat the fallback safety net.
 //
 // Tools and the memory/artifact/LLM-auditor integrations are gated on
 // GOOGLE_API_KEY because non-Gemini models cannot reliably execute structured
 // tool calls (Groq: 400 tool_use_failed; NVIDIA: 500 single-tool-only;
 // HuggingFace/OpenRouter: silent JSON mangling).
-func buildRunner(ctx context.Context) (*runner.Runner, session.Service, memory.Service, string, error) {
-	var candidateLLMs []model.LLM
-
-	// GitHub Models — enabled when GITHUB_PAT is set. Highest priority:
-	// supports GPT-4o, LLaMA 4, Claude, Gemini, DeepSeek and more via a
-	// single GitHub PAT. Set GITHUB_MODEL to override the default (gpt-4o).
-	if cfg := githubmodels.ConfigFromEnv(); cfg.PAT != "" {
-		m, err := githubmodels.NewModel(ctx, cfg)
-		if err != nil {
-			return nil, nil, nil, "", fmt.Errorf("githubmodels: %w", err)
-		}
-		candidateLLMs = append(candidateLLMs, m)
+func buildRunner(ctx context.Context) (*runner.Runner, session.Service, memory.Service, *failover.Model, string, error) {
+	m, err := chain.Build(ctx)
+	if err != nil {
+		return nil, nil, nil, nil, "", fmt.Errorf("setup: %w", err)
 	}
-
-	// Gemini — enabled when GOOGLE_API_KEY is set.
-	if key := os.Getenv("GOOGLE_API_KEY"); key != "" {
-		name := os.Getenv("GOOGLE_MODEL")
-		if name == "" {
-			name = "gemini-2.0-flash"
-		}
-		m, err := gemini.NewModel(ctx, name, &genai.ClientConfig{APIKey: key})
-		if err != nil {
-			return nil, nil, nil, "", fmt.Errorf("gemini: %w", err)
-		}
-		candidateLLMs = append(candidateLLMs, m)
-	}
-
-	// Groq — enabled when GROQ_API_KEY is set.
-	if cfg := groq.ConfigFromEnv(); cfg.APIKey != "" {
-		m, err := groq.NewModel(ctx, cfg)
-		if err != nil {
-			return nil, nil, nil, "", fmt.Errorf("groq: %w", err)
-		}
-		candidateLLMs = append(candidateLLMs, m)
-	}
-
-	// NVIDIA NIM — enabled when NVIDIA_API_KEY is set.
-	if cfg := nvidia.ConfigFromEnv(); cfg.APIKey != "" {
-		m, err := nvidia.NewModel(ctx, cfg)
-		if err != nil {
-			return nil, nil, nil, "", fmt.Errorf("nvidia: %w", err)
-		}
-		candidateLLMs = append(candidateLLMs, m)
-	}
-
-	// OpenRouter — enabled when OPENROUTER_API_KEY is set.
-	// One model only. Adding more free OpenRouter models with the same key
-	// does not help — they share the same upstream (e.g. Venice) which
-	// rate-limits by IP/key. For real failover use a different provider key:
-	// GROQ_API_KEY, OPENCODE_API_KEY, or GOOGLE_API_KEY.
-	if cfg := openrouter.ConfigFromEnv(); cfg.APIKey != "" {
-		m, err := openrouter.NewModel(ctx, cfg)
-		if err != nil {
-			return nil, nil, nil, "", fmt.Errorf("openrouter: %w", err)
-		}
-		candidateLLMs = append(candidateLLMs, m)
-	}
-
-	// OpenCode — enabled when OPENCODE_API_KEY is set.
-	// Provides free-tier models via https://opencode.ai/zen/v1.
-	if cfg := opencode.ConfigFromEnv(); cfg.APIKey != "" {
-		m, err := opencode.NewModel(ctx, cfg)
-		if err != nil {
-			return nil, nil, nil, "", fmt.Errorf("opencode: %w", err)
-		}
-		candidateLLMs = append(candidateLLMs, m)
-	}
-
-	// HuggingFace — enabled when HF_TOKEN is set.
-	if cfg := huggingface.ConfigFromEnv(); cfg.Token != "" {
-		m, err := huggingface.NewModel(ctx, cfg)
-		if err != nil {
-			return nil, nil, nil, "", fmt.Errorf("huggingface: %w", err)
-		}
-		candidateLLMs = append(candidateLLMs, m)
-	}
-
-	// Echo stub — zero-credential fallback; activated by ECHO_FALLBACK_ENABLED=1.
-	if echo.Enabled() {
-		candidateLLMs = append(candidateLLMs, echo.Default())
-		slog.Warn("echo fallback enabled — local testing only")
-	}
-
-	if len(candidateLLMs) == 0 {
-		return nil, nil, nil, "", fmt.Errorf(
-			"no model providers configured — set at least one of: " +
-				"GITHUB_PAT, GOOGLE_API_KEY, GROQ_API_KEY, NVIDIA_API_KEY, OPENROUTER_API_KEY, OPENCODE_API_KEY, HF_TOKEN",
-		)
-	}
-
-	// PROVIDER_SELECTED moves the named provider to the front of the chain.
-	// Valid values: github, gemini, groq, nvidia, openrouter, huggingface, echo.
-	// Example: PROVIDER_SELECTED=openrouter
-	candidateLLMs = applyProviderSelected(candidateLLMs)
-
-	m := failover.New(candidateLLMs[0], candidateLLMs[1:]...)
 	chainName := m.Name() // full failover chain name, e.g. "failover(github-models/gpt-4o → groq/llama...)"
 	slog.Info("model chain", "providers", chainName)
 
 	// ── Tools, skills, memory, artifacts, and LLM Auditor ────────────────────
 	//
-	// Skills and basic tools (weather, time, calculator) work with ANY provider
-	// that supports function calling — GitHub Models, OpenRouter, Groq, etc.
+	// Skills and basic tools (weather, time) work with ANY provider that
+	// supports function calling — GitHub Models, OpenRouter, Groq, etc.
 	// skilltoolset uses plain functiontool.New internally; it has no Gemini
 	// dependency whatsoever.
 	//
@@ -292,7 +268,7 @@ func buildRunner(ctx context.Context) (*runner.Runner, session.Service, memory.S
 	// struggle with (Groq: 400 tool_use_failed on complex chains).
 	//
 	// Tool inventory (all providers):
-	//   weather, time, calculator    – FunctionTools (tools/)
+	//   weather, time                – FunctionTools (tools/)
 	//   list_skills, load_skill,
 	//   load_skill_resource          – via SkillToolset (if ./skills/ exists)
 	//
@@ -304,16 +280,42 @@ func buildRunner(ctx context.Context) (*runner.Runner, session.Service, memory.S
 	var agentToolsets []tool.Toolset
 
 	// Basic tools — always enabled for any provider with function calling.
+	// read_file/write_file/grep_search/fetch_url are the harness's local/
+	// network capabilities: local-only (confined to cwd) or SSRF-guarded, so
+	// they carry the same trust posture as the existing attachment reader —
+	// safe to expose unconditionally, no GOOGLE_API_KEY gate needed.
+	readFileTool := tools.NewReadFileTool()
+	writeFileTool := tools.NewWriteFileTool()
+	editFileTool := tools.NewEditFileTool()
+	grepSearchTool := tools.NewGrepTool()
+	fetchURLTool := tools.NewFetchURLTool()
+	// execCommandTool requires human approval on every call (ADK's native
+	// RequireConfirmation / Human-in-the-Loop flow, wired through the TUI's
+	// y/n prompt in cmd/tui/chat.go) — that confirmation gate, not a
+	// provider gate, is what makes it safe to expose unconditionally here.
+	// See tools/exec.go's package doc comment for the full v1 security scope.
+	execCommandTool := tools.NewExecCommandTool()
 	agentTools = []tool.Tool{
 		tools.NewWeatherTool(),
 		tools.NewTimeTool(),
-		tools.NewCalculatorTool(),
+		readFileTool,
+		writeFileTool,
+		editFileTool,
+		grepSearchTool,
+		fetchURLTool,
+		execCommandTool,
 	}
 
-	baseInstruction := "You are cli-q, an expert AI assistant running in a terminal.\n\n" +
+	baseInstruction := "You are layar-cli, an expert AI assistant running in a terminal.\n\n" +
 		"## Tools\n" +
 		"- get_weather / get_current_time — use for weather and time questions\n" +
-		"- calculator — use for arithmetic\n" +
+		"- read_file / write_file — read or write a file in the working directory\n" +
+		"- edit_file — targeted find-and-replace edit to part of an existing file (prefer over write_file for partial changes)\n" +
+		"- grep_search — search files for a regular expression\n" +
+		"- fetch_url — fetch an http(s) URL\n" +
+		"- exec_command — run a shell command; ALWAYS pauses for explicit human " +
+		"approval first, so use it freely when it's the right tool, the human " +
+		"decides whether it actually runs\n" +
 		"- list_skills — call this (no arguments) to discover available skills\n" +
 		"- load_skill — call with {\"name\": \"<skill_name>\"} to load a skill's instructions\n\n" +
 		"## Skills workflow\n" +
@@ -328,8 +330,31 @@ func buildRunner(ctx context.Context) (*runner.Runner, session.Service, memory.S
 		"- Never pad responses with preamble or sign-offs"
 
 	// Skills toolset — enabled for any provider when ./skills/ dir exists.
+	//
+	// skill.NewFileSystemSource does not scan recursively (confirmed by
+	// reading its source, google.golang.org/adk's skill/filesystem_source.go:
+	// "It does not traverse recursively" — fs.ReadDir(".") only, one level)
+	// and this repo's skills are nested one level deeper under category
+	// folders (skills/engineering/debug/SKILL.md, not skills/debug/SKILL.md),
+	// so a single root-level source finds zero skills — a real, previously
+	// undetected bug: list_skills always returned 0 despite 44 real SKILL.md
+	// files on disk. Fixed by building one FileSystemSource per category
+	// subdirectory and combining them with skill.NewMergedSource — no skill
+	// files need to move. The root itself is also included so any future
+	// skill placed directly under ./skills (no category folder) still works.
 	if _, statErr := os.Stat("./skills"); statErr == nil {
-		rawSource := skill.NewFileSystemSource(os.DirFS("./skills"))
+		sources := []skill.Source{skill.NewFileSystemSource(os.DirFS("./skills"))}
+		if entries, readErr := os.ReadDir("./skills"); readErr == nil {
+			for _, e := range entries {
+				if e.IsDir() {
+					sources = append(sources, skill.NewFileSystemSource(os.DirFS("./skills/"+e.Name())))
+				}
+			}
+		} else {
+			slog.Warn("skills category scan failed — only root-level skills (if any) will be found", "error", readErr)
+		}
+		rawSource := skill.NewMergedSource(sources...)
+
 		preloaded, _, preloadErr := skill.WithCompletePreloadSource(ctx, rawSource)
 		if preloadErr != nil {
 			slog.Warn("skills preload failed — running without skills", "error", preloadErr)
@@ -339,7 +364,7 @@ func buildRunner(ctx context.Context) (*runner.Runner, session.Service, memory.S
 				slog.Warn("skills toolset init failed — running without skills", "error", stErr)
 			} else {
 				agentToolsets = append(agentToolsets, skillToolset)
-				slog.Info("skills toolset enabled", "path", "./skills")
+				slog.Info("skills toolset enabled", "path", "./skills", "categories", len(sources)-1)
 			}
 		}
 	}
@@ -348,21 +373,69 @@ func buildRunner(ctx context.Context) (*runner.Runner, session.Service, memory.S
 	// tools require reliable multi-step tool chains only Gemini handles well.
 	if os.Getenv("GOOGLE_API_KEY") != "" {
 		llmAuditor := agents.GetLLMAuditorAgent(ctx, m)
+		// search_agent — see agents/search.go's doc comment for why Google
+		// Search grounding must live in its own sub-agent rather than on the
+		// root agent's own tool list (Gemini API constraint, not a design
+		// choice).
+		searchAgent := agents.GetSearchAgent(ctx, m)
+		// Harness agents — advisor/judge/critique/review/critique_loop — gated
+		// here for the same reason as llm_auditor: reliable multi-step
+		// tool-calling (review_agent calls read_file/grep_search itself;
+		// critique_loop drives a multi-iteration LoopAgent) needs Gemini.
+		advisorAgent := agents.GetAdvisorAgent(ctx, m)
+		judgeAgent := agents.GetJudgeAgent(ctx, m)
+		critiqueAgent := agents.GetCritiqueAgent(ctx, m)
+		reviewAgent := agents.GetReviewAgent(ctx, m, readFileTool, grepSearchTool)
+		critiqueLoop := agents.GetCritiqueLoopAgent(ctx, m)
+		// manager_agent coordinates the 30-role SDLC team (agents/roles.go)
+		// plus cto_agent (agents/cto.go). tierA (advisory: read/grep/fetch,
+		// no mutation) vs tierB (tierA + write/edit) is the mechanism that
+		// keeps roles like cicd_agent/github_pr_agent advisory-only — see
+		// agents/roles.go's RoleTier doc comment.
+		// exec_command sits in tierB, not tierA: it is at least as risky as
+		// write_file/edit_file (arbitrary shell, not just file mutation), so
+		// cicd_agent/github_pr_agent (TierAdvisory → tierA) stay without it,
+		// same structural-enforcement pattern as the write/edit split above.
+		tierA := []tool.Tool{readFileTool, grepSearchTool, fetchURLTool}
+		tierB := []tool.Tool{readFileTool, grepSearchTool, fetchURLTool, writeFileTool, editFileTool, execCommandTool}
+		managerAgent := agents.GetManagerAgent(ctx, m, tierA, tierB)
 		agentTools = append(agentTools,
 			preloadmemorytool.New(),
 			loadmemorytool.New(),
 			loadartifactstool.New(),
 			agenttool.New(llmAuditor, nil),
+			agenttool.New(searchAgent, nil),
+			agenttool.New(advisorAgent, nil),
+			agenttool.New(judgeAgent, nil),
+			agenttool.New(critiqueAgent, nil),
+			agenttool.New(reviewAgent, nil),
+			agenttool.New(critiqueLoop, nil),
+			agenttool.New(managerAgent, nil),
 		)
-		baseInstruction = "You are cli-q, an expert AI assistant running in a terminal.\n\n" +
+		baseInstruction = "You are layar-cli, an expert AI assistant running in a terminal.\n\n" +
 			"## Tools\n" +
 			"- get_weather / get_current_time — use for weather and time questions\n" +
-			"- calculator — use for arithmetic\n" +
+			"- read_file / write_file — read or write a file in the working directory\n" +
+			"- edit_file — targeted find-and-replace edit to part of an existing file (prefer over write_file for partial changes)\n" +
+			"- grep_search — search files for a regular expression\n" +
+			"- fetch_url — fetch an http(s) URL\n" +
+			"- exec_command — run a shell command; ALWAYS pauses for explicit human " +
+			"approval first, so use it freely when it's the right tool, the human " +
+			"decides whether it actually runs\n" +
 			"- list_skills — call this (no arguments) to discover available skills\n" +
 			"- load_skill — call with {\"name\": \"<skill_name>\"} to load a skill's instructions\n" +
 			"- preload_memory / load_memory — recall facts from past conversations\n" +
 			"- load_artifacts — access previously saved files\n" +
-			"- llm_auditor — delegate fact-checking and verification tasks here\n\n" +
+			"- llm_auditor — delegate fact-checking and verification tasks here\n" +
+			"- search_agent — delegate web-search questions here (real-time Google Search grounding)\n" +
+			"- advisor_agent — get a second opinion on a plan or approach\n" +
+			"- judge_agent — score content against a rubric (APPROVED/NEEDS_WORK)\n" +
+			"- critique_agent — adversarially try to refute a claim or code\n" +
+			"- review_agent — review real files (it reads/greps them itself)\n" +
+			"- critique_loop — iteratively draft-and-critique something up to 3 cycles\n" +
+			"- manager_agent — delegate SDLC/engineering-team tasks (backend, frontend, database, AI, " +
+			"design, QA, PM, DevOps, security, etc.) here; it routes to the right specialist(s) and " +
+			"consults cto_agent on high-stakes final calls\n\n" +
 			"## Skills workflow\n" +
 			"If the user's request matches a specialized task (code review, architecture, " +
 			"debugging, documentation, etc.), ALWAYS:\n" +
@@ -383,15 +456,15 @@ func buildRunner(ctx context.Context) (*runner.Runner, session.Service, memory.S
 	agentConfig.instruction = baseInstruction
 
 	rootAgent, err := llmagent.New(llmagent.Config{
-		Name:        "cli-q",
+		Name:        "layar-cli",
 		Model:       m,
-		Description: "Helpful AI assistant. Tools: weather, time, calculator, memory recall, artifact access, LLM fact-checker (Gemini only).",
+		Description: "Helpful AI assistant. Tools: weather, time, file read/write/edit, grep, fetch_url, exec_command (human-confirmed shell exec) — any provider; memory recall, artifact access, LLM fact-checker, search_agent (Google Search grounding), manager_agent (30-role SDLC team + CTO agent) — Gemini only.",
 		Instruction: baseInstruction,
 		Tools:       agentTools,
 		Toolsets:    agentToolsets,
 	})
 	if err != nil {
-		return nil, nil, nil, "", fmt.Errorf("create agent: %w", err)
+		return nil, nil, nil, nil, "", fmt.Errorf("create agent: %w", err)
 	}
 
 	// Memory service: backs preload_memory and load_memory tools.
@@ -402,10 +475,10 @@ func buildRunner(ctx context.Context) (*runner.Runner, session.Service, memory.S
 	sessionSvc := session.InMemoryService()
 	r, err := buildRunnerFromAgent(rootAgent, sessionSvc, memorySvc)
 	if err != nil {
-		return nil, nil, nil, "", fmt.Errorf("create runner: %w", err)
+		return nil, nil, nil, nil, "", fmt.Errorf("create runner: %w", err)
 	}
 
-	return r, sessionSvc, memorySvc, chainName, nil
+	return r, sessionSvc, memorySvc, m, chainName, nil
 }
 
 // buildRunnerFromAgent creates a new runner from an already-built agent,
@@ -427,9 +500,9 @@ func buildRunnerFromAgent(ag agent.Agent, sessionSvc session.Service, memorySvc 
 // populated by buildRunner before this is called.
 func rebuildRunnerWithModel(ctx context.Context, llm model.LLM, sessionSvc session.Service, memorySvc memory.Service) (*runner.Runner, error) {
 	ag, err := llmagent.New(llmagent.Config{
-		Name:        "cli-q",
+		Name:        "layar-cli",
 		Model:       llm,
-		Description: "Helpful AI assistant. Tools: weather, time, calculator, memory recall, artifact access, LLM fact-checker (Gemini only).",
+		Description: "Helpful AI assistant. Tools: weather, time, file read/write/edit, grep, fetch_url, exec_command (human-confirmed shell exec) — any provider; memory recall, artifact access, LLM fact-checker, search_agent (Google Search grounding), manager_agent (30-role SDLC team + CTO agent) — Gemini only.",
 		Instruction: agentConfig.instruction,
 		Tools:       agentConfig.tools,
 		Toolsets:    agentConfig.toolsets,
@@ -438,73 +511,6 @@ func rebuildRunnerWithModel(ctx context.Context, llm model.LLM, sessionSvc sessi
 		return nil, fmt.Errorf("create agent: %w", err)
 	}
 	return buildRunnerFromAgent(ag, sessionSvc, memorySvc)
-}
-
-// newModelForEntry creates a model.LLM for the given provider catalog entry.
-// Called from the TUI /model picker when the user selects a new model.
-// Reads credentials from the same environment variables as buildRunner.
-//
-// Returns an error if the required API key is not set or model creation fails.
-func newModelForEntry(ctx context.Context, providerID, modelID string) (model.LLM, error) {
-	switch providerID {
-	case "github-models":
-		cfg := githubmodels.ConfigFromEnv()
-		if cfg.PAT == "" {
-			return nil, fmt.Errorf("GITHUB_PAT not set")
-		}
-		cfg.ModelName = modelID
-		return githubmodels.NewModel(ctx, cfg)
-
-	case "gemini":
-		key := os.Getenv("GOOGLE_API_KEY")
-		if key == "" {
-			return nil, fmt.Errorf("GOOGLE_API_KEY not set")
-		}
-		return gemini.NewModel(ctx, modelID, &genai.ClientConfig{APIKey: key})
-
-	case "groq":
-		cfg := groq.ConfigFromEnv()
-		if cfg.APIKey == "" {
-			return nil, fmt.Errorf("GROQ_API_KEY not set")
-		}
-		cfg.ModelName = modelID
-		return groq.NewModel(ctx, cfg)
-
-	case "nvidia":
-		cfg := nvidia.ConfigFromEnv()
-		if cfg.APIKey == "" {
-			return nil, fmt.Errorf("NVIDIA_API_KEY not set")
-		}
-		cfg.ModelName = modelID
-		return nvidia.NewModel(ctx, cfg)
-
-	case "openrouter":
-		cfg := openrouter.ConfigFromEnv()
-		if cfg.APIKey == "" {
-			return nil, fmt.Errorf("OPENROUTER_API_KEY not set")
-		}
-		cfg.ModelName = modelID
-		return openrouter.NewModel(ctx, cfg)
-
-	case "opencode":
-		cfg := opencode.ConfigFromEnv()
-		if cfg.APIKey == "" {
-			return nil, fmt.Errorf("OPENCODE_API_KEY not set")
-		}
-		cfg.ModelName = modelID
-		return opencode.NewModel(ctx, cfg)
-
-	case "huggingface":
-		cfg := huggingface.ConfigFromEnv()
-		if cfg.Token == "" {
-			return nil, fmt.Errorf("HF_TOKEN not set")
-		}
-		cfg.ModelName = modelID
-		return huggingface.NewModel(ctx, cfg)
-
-	default:
-		return nil, fmt.Errorf("unknown provider %q", providerID)
-	}
 }
 
 // runOnce sends one message to the agent, prints the final response, and exits.

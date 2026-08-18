@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 
+	"go-adk-q/cmd/tui/theme"
+
 	"github.com/charmbracelet/huh"
 )
 
@@ -16,10 +18,10 @@ import (
 // The returned *huh.Form implements tea.Model and can be sized with
 // WithWidth / WithHeight before passing to Init.
 func buildSettingsForm(themeIdx *int, charLimit *int) *huh.Form {
-	// Build theme option list from builtinThemes.
-	themeOptions := make([]huh.Option[int], len(builtinThemes))
-	for i, t := range builtinThemes {
-		themeOptions[i] = huh.NewOption(t.name, i)
+	// Build theme option list from theme.BuiltinThemes.
+	themeOptions := make([]huh.Option[int], len(theme.BuiltinThemes))
+	for i, t := range theme.BuiltinThemes {
+		themeOptions[i] = huh.NewOption(t.Name, i)
 	}
 
 	// Character-limit presets.

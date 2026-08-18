@@ -49,6 +49,7 @@ import (
 var KnownModels = catalog.ProviderCatalog{
 	Provider: "groq",
 	Label:    "Groq",
+	EnvVar:   EnvAPIKey,
 	Models: []catalog.ModelEntry{
 		{ID: "llama-3.1-8b-instant", Label: "Llama 3.1 8B Instant", Tags: []string{"fast"}, Default: true},
 		{ID: "llama-3.3-70b-versatile", Label: "Llama 3.3 70B Versatile"},

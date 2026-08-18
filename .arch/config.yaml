@@ -1,0 +1,11 @@
+# Arch Knowledge Agentic — project configuration
+# Commit this file to share KG context with your team.
+# Never commit .arch/.env (it is gitignored automatically).
+
+server_url: http://localhost:9004/api/knowledge
+project_id: f60684ce-b0de-468e-bfdb-8e38196fc6aa
+project_name: go-adk-q
+git_remote: git@github.com-mochammadshenna:mochammadshenna/go-adk-q.git
+language: javascript
+arch_version: "1.0"
+created_at: "2026-07-12T03:07:28Z"

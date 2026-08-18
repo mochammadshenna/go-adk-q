@@ -56,6 +56,7 @@ import (
 var KnownModels = catalog.ProviderCatalog{
 	Provider: "opencode",
 	Label:    "OpenCode",
+	EnvVar:   EnvAPIKey,
 	Models: []catalog.ModelEntry{
 		// ── Default (free) ────────────────────────────────────────────────
 		{ID: "deepseek-v4-flash-free", Label: "DeepSeek V4 Flash (free)", Tags: []string{"free"}, Default: true},

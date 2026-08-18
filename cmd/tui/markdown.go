@@ -29,6 +29,8 @@ import (
 	"strings"
 	"sync"
 
+	"go-adk-q/cmd/tui/theme"
+
 	chromaQuick "github.com/alecthomas/chroma/v2/quick"
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/glamour/ansi"
@@ -44,6 +46,18 @@ func uintPtr(u uint) *uint    { return &u }
 // hexToANSIBg converts a "#rrggbb" hex colour to a 24-bit ANSI background
 // escape sequence: \x1b[48;2;r;g;bm
 func hexToANSIBg(hex string) string {
+	return hexToANSI(hex, 48)
+}
+
+// hexToANSIFg converts a "#rrggbb" hex colour to a 24-bit ANSI foreground
+// escape sequence: \x1b[38;2;r;g;bm
+func hexToANSIFg(hex string) string {
+	return hexToANSI(hex, 38)
+}
+
+// hexToANSI converts a "#rrggbb" hex colour to a 24-bit ANSI escape sequence
+// using the given SGR base code (38 = foreground, 48 = background).
+func hexToANSI(hex string, sgrBase int) string {
 	hex = strings.TrimPrefix(hex, "#")
 	if len(hex) != 6 {
 		return ""
@@ -51,7 +65,7 @@ func hexToANSIBg(hex string) string {
 	r, _ := strconv.ParseInt(hex[0:2], 16, 32)
 	g, _ := strconv.ParseInt(hex[2:4], 16, 32)
 	b, _ := strconv.ParseInt(hex[4:6], 16, 32)
-	return fmt.Sprintf("\x1b[48;2;%d;%d;%dm", r, g, b)
+	return fmt.Sprintf("\x1b[%d;2;%d;%d;%dm", sgrBase, r, g, b)
 }
 
 // bgStripRe matches any ANSI 48;2 (24-bit background) sequence so we can
@@ -61,9 +75,9 @@ var bgStripRe = regexp.MustCompile(`\x1b\[(?:[0-9]+;)*48;2;[0-9]+;[0-9]+;[0-9]+(
 // ── Per-theme code-block palette ──────────────────────────────────────────────
 
 type codeBlockPalette struct {
-	codeBg     string // #rrggbb — code area background (fills to full width)
-	headerBg   string // #rrggbb — language label bar background
-	headerFg   string // #rrggbb — language label bar foreground
+	codeBg      string // #rrggbb — code area background (fills to full width)
+	headerBg    string // #rrggbb — language label bar background
+	headerFg    string // #rrggbb — language label bar foreground
 	chromaStyle string // Chroma style name for syntax highlighting
 }
 
@@ -98,14 +112,14 @@ func getCodePalette(themeIdx int) codeBlockPalette {
 
 // renderCodeBlock renders a single fenced code block as a full-width box:
 //
-//	  ▸ go  ──────────────────────────────────────── (header bar)
-//	  package main                                   (code lines, bg fills width)
-//	  …                                              (bottom bar)
+//	▸ go  ──────────────────────────────────────── (header bar)
+//	package main                                   (code lines, bg fills width)
+//	…                                              (bottom bar)
 //
 // Every code line's background extends to contentW so the box is clearly
 // visible regardless of how long the code is.
-func renderCodeBlock(s styledSet, lang, body string, contentW int) string {
-	pal := getCodePalette(s.themeIdx)
+func renderCodeBlock(s theme.StyledSet, lang, body string, contentW int) string {
+	pal := getCodePalette(s.ThemeIdx)
 
 	langDisplay := strings.TrimSpace(lang)
 	if langDisplay == "" {
@@ -113,22 +127,30 @@ func renderCodeBlock(s styledSet, lang, body string, contentW int) string {
 	}
 
 	// ── Header bar ────────────────────────────────────────────────────────
-	headerStyle := lipgloss.NewStyle().
-		Background(lipgloss.Color(pal.headerBg)).
-		Foreground(lipgloss.Color(pal.headerFg)).
-		Bold(true)
-	header := headerStyle.Width(contentW).Render("  ▸ " + langDisplay)
+	// Built from raw truecolor ANSI escapes rather than lipgloss.Style.Render:
+	// lipgloss picks its color profile from ambient terminal detection (isatty,
+	// $TERM, $COLORTERM), which can silently downgrade to no-color in contexts
+	// where that detection differs from what the hardcoded 24-bit escapes below
+	// assume — producing a colorless header bar directly above a fully-colored
+	// code body. Forcing explicit truecolor here keeps both in sync always.
+	const reset = "\x1b[0m"
+	const bold = "\x1b[1m"
+	headerBgANSI := hexToANSIBg(pal.headerBg)
+	headerFgANSI := hexToANSIFg(pal.headerFg)
+	headerText := "  ▸ " + langDisplay
+	headerPad := contentW - lipgloss.Width(headerText)
+	if headerPad < 0 {
+		headerPad = 0
+	}
+	header := headerBgANSI + bold + headerFgANSI + headerText + strings.Repeat(" ", headerPad) + reset
 
 	// ── Bottom separator ──────────────────────────────────────────────────
 	// Thin bottom accent: ▁ characters in header colour, no fill background.
 	// This gives a clean underline without the heavy full-height bar.
-	bottom := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(pal.headerBg)).
-		Render(strings.Repeat("▁", contentW))
+	bottom := hexToANSIFg(pal.headerBg) + strings.Repeat("▁", contentW) + reset
 
 	// ── Syntax highlight with Chroma ──────────────────────────────────────
 	codeBgANSI := hexToANSIBg(pal.codeBg)
-	const reset = "\x1b[0m"
 
 	var chromaBuf bytes.Buffer
 	err := chromaQuick.Highlight(&chromaBuf, body+"\n", lang, "terminal16m", pal.chromaStyle)
@@ -180,12 +202,12 @@ func renderCodeBlock(s styledSet, lang, body string, contentW int) string {
 // renderProse passes non-code markdown prose through glamour.
 // Used by the hybrid renderMarkdown path when there are code segments mixed
 // with prose.
-func renderProse(s styledSet, prose string, contentW int, baseStyle lipgloss.Style) string {
+func renderProse(s theme.StyledSet, prose string, contentW int, baseStyle lipgloss.Style) string {
 	prose = strings.TrimSpace(prose)
 	if prose == "" {
 		return ""
 	}
-	r := cachedRenderer(s.themeIdx, contentW)
+	r := cachedRenderer(s.ThemeIdx, contentW)
 	if r == nil {
 		return baseStyle.PaddingLeft(2).Width(contentW).Render(prose) + "\n"
 	}
@@ -207,7 +229,7 @@ func renderProse(s styledSet, prose string, contentW int, baseStyle lipgloss.Sty
 // Streaming safety: if the text has an unclosed ``` fence (partial stream),
 // a closing ``` is appended before parsing so glamour/Chroma see a complete
 // document.
-func renderMarkdown(s styledSet, text string, contentW int, baseStyle lipgloss.Style) string {
+func renderMarkdown(s theme.StyledSet, text string, contentW int, baseStyle lipgloss.Style) string {
 	if text == "" {
 		return ""
 	}
@@ -232,7 +254,7 @@ func renderMarkdown(s styledSet, text string, contentW int, baseStyle lipgloss.S
 		}
 	}
 	if !hasCode {
-		r := cachedRenderer(s.themeIdx, contentW)
+		r := cachedRenderer(s.ThemeIdx, contentW)
 		if r != nil {
 			rendered, err := r.Render(textToRender)
 			if err == nil && strings.TrimSpace(rendered) != "" {
@@ -244,9 +266,12 @@ func renderMarkdown(s styledSet, text string, contentW int, baseStyle lipgloss.S
 	}
 
 	// Hybrid path: prose → glamour, code → renderCodeBlock.
+	// Markdown-tagged fences (```md, ```markdown, ...) render through glamour
+	// too — Chroma's markdown lexer has no block-level renderer, so headings/
+	// lists/bold would otherwise come out as literal "## Heading" text.
 	var out strings.Builder
 	for _, seg := range segments {
-		if seg.code {
+		if seg.code && !isMarkdownLang(seg.lang) {
 			out.WriteString(renderCodeBlock(s, seg.lang, seg.body, contentW))
 		} else {
 			out.WriteString(renderProse(s, seg.body, contentW, baseStyle))
@@ -258,6 +283,25 @@ func renderMarkdown(s styledSet, text string, contentW int, baseStyle lipgloss.S
 		return baseStyle.PaddingLeft(2).Width(contentW).Render(strings.TrimSpace(text)) + "\n"
 	}
 	return result + "\n"
+}
+
+// isMarkdownLang reports whether a fenced code block's language tag names
+// markdown itself (```md, ```markdown, etc.) rather than a real programming
+// language. Chroma's markdown lexer only does inline tokenization (code
+// spans, comments) — it does not render block-level markdown (headings,
+// bold, lists), so a markdown-tagged fence rendered via renderCodeBlock came
+// out as a box of raw "## Heading" text instead of an actual heading. Glow
+// (charmbracelet/glow) — the reference terminal markdown viewer — never
+// makes this distinction because it always renders full documents through
+// glamour; this is the equivalent fix for this hybrid renderer's fenced-code
+// path.
+func isMarkdownLang(lang string) bool {
+	switch strings.ToLower(strings.TrimSpace(lang)) {
+	case "md", "markdown", "mkd", "mdown":
+		return true
+	default:
+		return false
+	}
 }
 
 // countFences counts ``` fence-delimiter lines (odd = unclosed fence).
@@ -282,25 +326,25 @@ func glamourStyleConfig(themeIdx int) ansi.StyleConfig {
 				StylePrimitive: ansi.StylePrimitive{Color: strPtr("#cdd6f4")},
 				Margin:         uintPtr(0),
 			},
-			Paragraph:   ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Color: strPtr("#cdd6f4")}},
-			BlockQuote:  ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Color: strPtr("#a6adc8"), Italic: boolPtr(true)}, Indent: uintPtr(1), IndentToken: strPtr("│ ")},
-			List:        ansi.StyleList{LevelIndent: 2},
-			Heading:     ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Color: strPtr("#cba6f7"), Bold: boolPtr(true)}},
-			H1:          ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "# "}},
-			H2:          ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "## "}},
-			H3:          ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "### "}},
-			H4:          ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "#### "}},
-			H5:          ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "##### "}},
-			H6:          ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "###### "}},
-			Strikethrough: ansi.StylePrimitive{CrossedOut: boolPtr(true)},
-			Emph:        ansi.StylePrimitive{Color: strPtr("#f38ba8"), Italic: boolPtr(true)},
-			Strong:      ansi.StylePrimitive{Color: strPtr("#89b4fa"), Bold: boolPtr(true)},
+			Paragraph:      ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Color: strPtr("#cdd6f4")}},
+			BlockQuote:     ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Color: strPtr("#a6adc8"), Italic: boolPtr(true)}, Indent: uintPtr(1), IndentToken: strPtr("│ ")},
+			List:           ansi.StyleList{LevelIndent: 2},
+			Heading:        ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Color: strPtr("#cba6f7"), Bold: boolPtr(true)}},
+			H1:             ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "# "}},
+			H2:             ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "## "}},
+			H3:             ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "### "}},
+			H4:             ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "#### "}},
+			H5:             ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "##### "}},
+			H6:             ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "###### "}},
+			Strikethrough:  ansi.StylePrimitive{CrossedOut: boolPtr(true)},
+			Emph:           ansi.StylePrimitive{Color: strPtr("#f38ba8"), Italic: boolPtr(true)},
+			Strong:         ansi.StylePrimitive{Color: strPtr("#89b4fa"), Bold: boolPtr(true)},
 			HorizontalRule: ansi.StylePrimitive{Color: strPtr("#45475a"), Format: "\n─────────────────────────────────────\n"},
-			Item:        ansi.StylePrimitive{BlockPrefix: "• "},
-			Enumeration: ansi.StylePrimitive{BlockPrefix: ". ", Color: strPtr("#89dceb")},
-			Task:        ansi.StyleTask{Ticked: "[✓] ", Unticked: "[ ] "},
-			Link:        ansi.StylePrimitive{Color: strPtr("#89b4fa"), Underline: boolPtr(true)},
-			LinkText:    ansi.StylePrimitive{Color: strPtr("#cba6f7"), Bold: boolPtr(true)},
+			Item:           ansi.StylePrimitive{BlockPrefix: "• "},
+			Enumeration:    ansi.StylePrimitive{BlockPrefix: ". ", Color: strPtr("#89dceb")},
+			Task:           ansi.StyleTask{Ticked: "[✓] ", Unticked: "[ ] "},
+			Link:           ansi.StylePrimitive{Color: strPtr("#89b4fa"), Underline: boolPtr(true)},
+			LinkText:       ansi.StylePrimitive{Color: strPtr("#cba6f7"), Bold: boolPtr(true)},
 			Code: ansi.StyleBlock{
 				StylePrimitive: ansi.StylePrimitive{
 					Color:           strPtr("#a6e3a1"),
@@ -321,26 +365,26 @@ func glamourStyleConfig(themeIdx int) ansi.StyleConfig {
 
 	case 1: // ── Tokyo Night ───────────────────────────────────────────────
 		return ansi.StyleConfig{
-			Document:    ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Color: strPtr("#c0caf5")}, Margin: uintPtr(0)},
-			Paragraph:   ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Color: strPtr("#c0caf5")}},
-			BlockQuote:  ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Color: strPtr("#565f89"), Italic: boolPtr(true)}, Indent: uintPtr(1), IndentToken: strPtr("│ ")},
-			List:        ansi.StyleList{LevelIndent: 2},
-			Heading:     ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Color: strPtr("#bb9af7"), Bold: boolPtr(true)}},
-			H1:          ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "# "}},
-			H2:          ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "## "}},
-			H3:          ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "### "}},
-			H4:          ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "#### "}},
-			H5:          ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "##### "}},
-			H6:          ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "###### "}},
-			Strikethrough: ansi.StylePrimitive{CrossedOut: boolPtr(true)},
-			Emph:        ansi.StylePrimitive{Color: strPtr("#f7768e"), Italic: boolPtr(true)},
-			Strong:      ansi.StylePrimitive{Color: strPtr("#7aa2f7"), Bold: boolPtr(true)},
+			Document:       ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Color: strPtr("#c0caf5")}, Margin: uintPtr(0)},
+			Paragraph:      ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Color: strPtr("#c0caf5")}},
+			BlockQuote:     ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Color: strPtr("#565f89"), Italic: boolPtr(true)}, Indent: uintPtr(1), IndentToken: strPtr("│ ")},
+			List:           ansi.StyleList{LevelIndent: 2},
+			Heading:        ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Color: strPtr("#bb9af7"), Bold: boolPtr(true)}},
+			H1:             ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "# "}},
+			H2:             ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "## "}},
+			H3:             ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "### "}},
+			H4:             ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "#### "}},
+			H5:             ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "##### "}},
+			H6:             ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "###### "}},
+			Strikethrough:  ansi.StylePrimitive{CrossedOut: boolPtr(true)},
+			Emph:           ansi.StylePrimitive{Color: strPtr("#f7768e"), Italic: boolPtr(true)},
+			Strong:         ansi.StylePrimitive{Color: strPtr("#7aa2f7"), Bold: boolPtr(true)},
 			HorizontalRule: ansi.StylePrimitive{Color: strPtr("#3b4261"), Format: "\n─────────────────────────────────────\n"},
-			Item:        ansi.StylePrimitive{BlockPrefix: "• "},
-			Enumeration: ansi.StylePrimitive{BlockPrefix: ". ", Color: strPtr("#73daca")},
-			Task:        ansi.StyleTask{Ticked: "[✓] ", Unticked: "[ ] "},
-			Link:        ansi.StylePrimitive{Color: strPtr("#7aa2f7"), Underline: boolPtr(true)},
-			LinkText:    ansi.StylePrimitive{Color: strPtr("#bb9af7"), Bold: boolPtr(true)},
+			Item:           ansi.StylePrimitive{BlockPrefix: "• "},
+			Enumeration:    ansi.StylePrimitive{BlockPrefix: ". ", Color: strPtr("#73daca")},
+			Task:           ansi.StyleTask{Ticked: "[✓] ", Unticked: "[ ] "},
+			Link:           ansi.StylePrimitive{Color: strPtr("#7aa2f7"), Underline: boolPtr(true)},
+			LinkText:       ansi.StylePrimitive{Color: strPtr("#bb9af7"), Bold: boolPtr(true)},
 			Code: ansi.StyleBlock{
 				StylePrimitive: ansi.StylePrimitive{
 					Color:           strPtr("#9ece6a"),
@@ -361,26 +405,26 @@ func glamourStyleConfig(themeIdx int) ansi.StyleConfig {
 
 	case 2: // ── Rosé Pine ────────────────────────────────────────────────
 		return ansi.StyleConfig{
-			Document:    ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Color: strPtr("#e0def4")}, Margin: uintPtr(0)},
-			Paragraph:   ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Color: strPtr("#e0def4")}},
-			BlockQuote:  ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Color: strPtr("#6e6a86"), Italic: boolPtr(true)}, Indent: uintPtr(1), IndentToken: strPtr("│ ")},
-			List:        ansi.StyleList{LevelIndent: 2},
-			Heading:     ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Color: strPtr("#c4a7e7"), Bold: boolPtr(true)}},
-			H1:          ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "# "}},
-			H2:          ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "## "}},
-			H3:          ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "### "}},
-			H4:          ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "#### "}},
-			H5:          ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "##### "}},
-			H6:          ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "###### "}},
-			Strikethrough: ansi.StylePrimitive{CrossedOut: boolPtr(true)},
-			Emph:        ansi.StylePrimitive{Color: strPtr("#eb6f92"), Italic: boolPtr(true)},
-			Strong:      ansi.StylePrimitive{Color: strPtr("#9ccfd8"), Bold: boolPtr(true)},
+			Document:       ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Color: strPtr("#e0def4")}, Margin: uintPtr(0)},
+			Paragraph:      ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Color: strPtr("#e0def4")}},
+			BlockQuote:     ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Color: strPtr("#6e6a86"), Italic: boolPtr(true)}, Indent: uintPtr(1), IndentToken: strPtr("│ ")},
+			List:           ansi.StyleList{LevelIndent: 2},
+			Heading:        ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Color: strPtr("#c4a7e7"), Bold: boolPtr(true)}},
+			H1:             ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "# "}},
+			H2:             ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "## "}},
+			H3:             ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "### "}},
+			H4:             ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "#### "}},
+			H5:             ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "##### "}},
+			H6:             ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "###### "}},
+			Strikethrough:  ansi.StylePrimitive{CrossedOut: boolPtr(true)},
+			Emph:           ansi.StylePrimitive{Color: strPtr("#eb6f92"), Italic: boolPtr(true)},
+			Strong:         ansi.StylePrimitive{Color: strPtr("#9ccfd8"), Bold: boolPtr(true)},
 			HorizontalRule: ansi.StylePrimitive{Color: strPtr("#403d52"), Format: "\n─────────────────────────────────────\n"},
-			Item:        ansi.StylePrimitive{BlockPrefix: "• "},
-			Enumeration: ansi.StylePrimitive{BlockPrefix: ". ", Color: strPtr("#31748f")},
-			Task:        ansi.StyleTask{Ticked: "[✓] ", Unticked: "[ ] "},
-			Link:        ansi.StylePrimitive{Color: strPtr("#9ccfd8"), Underline: boolPtr(true)},
-			LinkText:    ansi.StylePrimitive{Color: strPtr("#c4a7e7"), Bold: boolPtr(true)},
+			Item:           ansi.StylePrimitive{BlockPrefix: "• "},
+			Enumeration:    ansi.StylePrimitive{BlockPrefix: ". ", Color: strPtr("#31748f")},
+			Task:           ansi.StyleTask{Ticked: "[✓] ", Unticked: "[ ] "},
+			Link:           ansi.StylePrimitive{Color: strPtr("#9ccfd8"), Underline: boolPtr(true)},
+			LinkText:       ansi.StylePrimitive{Color: strPtr("#c4a7e7"), Bold: boolPtr(true)},
 			Code: ansi.StyleBlock{
 				StylePrimitive: ansi.StylePrimitive{
 					Color:           strPtr("#f6c177"),
@@ -401,26 +445,26 @@ func glamourStyleConfig(themeIdx int) ansi.StyleConfig {
 
 	case 3: // ── Nord ──────────────────────────────────────────────────────
 		return ansi.StyleConfig{
-			Document:    ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Color: strPtr("#d8dee9")}, Margin: uintPtr(0)},
-			Paragraph:   ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Color: strPtr("#d8dee9")}},
-			BlockQuote:  ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Color: strPtr("#616e88"), Italic: boolPtr(true)}, Indent: uintPtr(1), IndentToken: strPtr("│ ")},
-			List:        ansi.StyleList{LevelIndent: 2},
-			Heading:     ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Color: strPtr("#81a1c1"), Bold: boolPtr(true)}},
-			H1:          ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "# "}},
-			H2:          ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "## "}},
-			H3:          ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "### "}},
-			H4:          ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "#### "}},
-			H5:          ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "##### "}},
-			H6:          ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "###### "}},
-			Strikethrough: ansi.StylePrimitive{CrossedOut: boolPtr(true)},
-			Emph:        ansi.StylePrimitive{Color: strPtr("#ebcb8b"), Italic: boolPtr(true)},
-			Strong:      ansi.StylePrimitive{Color: strPtr("#88c0d0"), Bold: boolPtr(true)},
+			Document:       ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Color: strPtr("#d8dee9")}, Margin: uintPtr(0)},
+			Paragraph:      ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Color: strPtr("#d8dee9")}},
+			BlockQuote:     ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Color: strPtr("#616e88"), Italic: boolPtr(true)}, Indent: uintPtr(1), IndentToken: strPtr("│ ")},
+			List:           ansi.StyleList{LevelIndent: 2},
+			Heading:        ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Color: strPtr("#81a1c1"), Bold: boolPtr(true)}},
+			H1:             ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "# "}},
+			H2:             ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "## "}},
+			H3:             ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "### "}},
+			H4:             ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "#### "}},
+			H5:             ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "##### "}},
+			H6:             ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "###### "}},
+			Strikethrough:  ansi.StylePrimitive{CrossedOut: boolPtr(true)},
+			Emph:           ansi.StylePrimitive{Color: strPtr("#ebcb8b"), Italic: boolPtr(true)},
+			Strong:         ansi.StylePrimitive{Color: strPtr("#88c0d0"), Bold: boolPtr(true)},
 			HorizontalRule: ansi.StylePrimitive{Color: strPtr("#3b4252"), Format: "\n─────────────────────────────────────\n"},
-			Item:        ansi.StylePrimitive{BlockPrefix: "• "},
-			Enumeration: ansi.StylePrimitive{BlockPrefix: ". ", Color: strPtr("#8fbcbb")},
-			Task:        ansi.StyleTask{Ticked: "[✓] ", Unticked: "[ ] "},
-			Link:        ansi.StylePrimitive{Color: strPtr("#81a1c1"), Underline: boolPtr(true)},
-			LinkText:    ansi.StylePrimitive{Color: strPtr("#88c0d0"), Bold: boolPtr(true)},
+			Item:           ansi.StylePrimitive{BlockPrefix: "• "},
+			Enumeration:    ansi.StylePrimitive{BlockPrefix: ". ", Color: strPtr("#8fbcbb")},
+			Task:           ansi.StyleTask{Ticked: "[✓] ", Unticked: "[ ] "},
+			Link:           ansi.StylePrimitive{Color: strPtr("#81a1c1"), Underline: boolPtr(true)},
+			LinkText:       ansi.StylePrimitive{Color: strPtr("#88c0d0"), Bold: boolPtr(true)},
 			Code: ansi.StyleBlock{
 				StylePrimitive: ansi.StylePrimitive{
 					Color:           strPtr("#a3be8c"),
@@ -441,26 +485,26 @@ func glamourStyleConfig(themeIdx int) ansi.StyleConfig {
 
 	case 4: // ── Gruvbox ───────────────────────────────────────────────────
 		return ansi.StyleConfig{
-			Document:    ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Color: strPtr("#ebdbb2")}, Margin: uintPtr(0)},
-			Paragraph:   ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Color: strPtr("#ebdbb2")}},
-			BlockQuote:  ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Color: strPtr("#928374"), Italic: boolPtr(true)}, Indent: uintPtr(1), IndentToken: strPtr("│ ")},
-			List:        ansi.StyleList{LevelIndent: 2},
-			Heading:     ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Color: strPtr("#fe8019"), Bold: boolPtr(true)}},
-			H1:          ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "# "}},
-			H2:          ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "## "}},
-			H3:          ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "### "}},
-			H4:          ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "#### "}},
-			H5:          ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "##### "}},
-			H6:          ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "###### "}},
-			Strikethrough: ansi.StylePrimitive{CrossedOut: boolPtr(true)},
-			Emph:        ansi.StylePrimitive{Color: strPtr("#d3869b"), Italic: boolPtr(true)},
-			Strong:      ansi.StylePrimitive{Color: strPtr("#fabd2f"), Bold: boolPtr(true)},
+			Document:       ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Color: strPtr("#ebdbb2")}, Margin: uintPtr(0)},
+			Paragraph:      ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Color: strPtr("#ebdbb2")}},
+			BlockQuote:     ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Color: strPtr("#928374"), Italic: boolPtr(true)}, Indent: uintPtr(1), IndentToken: strPtr("│ ")},
+			List:           ansi.StyleList{LevelIndent: 2},
+			Heading:        ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Color: strPtr("#fe8019"), Bold: boolPtr(true)}},
+			H1:             ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "# "}},
+			H2:             ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "## "}},
+			H3:             ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "### "}},
+			H4:             ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "#### "}},
+			H5:             ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "##### "}},
+			H6:             ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "###### "}},
+			Strikethrough:  ansi.StylePrimitive{CrossedOut: boolPtr(true)},
+			Emph:           ansi.StylePrimitive{Color: strPtr("#d3869b"), Italic: boolPtr(true)},
+			Strong:         ansi.StylePrimitive{Color: strPtr("#fabd2f"), Bold: boolPtr(true)},
 			HorizontalRule: ansi.StylePrimitive{Color: strPtr("#504945"), Format: "\n─────────────────────────────────────\n"},
-			Item:        ansi.StylePrimitive{BlockPrefix: "• "},
-			Enumeration: ansi.StylePrimitive{BlockPrefix: ". ", Color: strPtr("#8ec07c")},
-			Task:        ansi.StyleTask{Ticked: "[✓] ", Unticked: "[ ] "},
-			Link:        ansi.StylePrimitive{Color: strPtr("#83a598"), Underline: boolPtr(true)},
-			LinkText:    ansi.StylePrimitive{Color: strPtr("#fe8019"), Bold: boolPtr(true)},
+			Item:           ansi.StylePrimitive{BlockPrefix: "• "},
+			Enumeration:    ansi.StylePrimitive{BlockPrefix: ". ", Color: strPtr("#8ec07c")},
+			Task:           ansi.StyleTask{Ticked: "[✓] ", Unticked: "[ ] "},
+			Link:           ansi.StylePrimitive{Color: strPtr("#83a598"), Underline: boolPtr(true)},
+			LinkText:       ansi.StylePrimitive{Color: strPtr("#fe8019"), Bold: boolPtr(true)},
 			Code: ansi.StyleBlock{
 				StylePrimitive: ansi.StylePrimitive{
 					Color:           strPtr("#b8bb26"),
@@ -481,26 +525,26 @@ func glamourStyleConfig(themeIdx int) ansi.StyleConfig {
 
 	case 5: // ── GitHub Light ──────────────────────────────────────────────
 		return ansi.StyleConfig{
-			Document:    ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Color: strPtr("#24292e")}, Margin: uintPtr(0)},
-			Paragraph:   ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Color: strPtr("#24292e")}},
-			BlockQuote:  ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Color: strPtr("#6a737d"), Italic: boolPtr(true)}, Indent: uintPtr(1), IndentToken: strPtr("│ ")},
-			List:        ansi.StyleList{LevelIndent: 2},
-			Heading:     ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Color: strPtr("#005cc5"), Bold: boolPtr(true)}},
-			H1:          ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "# "}},
-			H2:          ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "## "}},
-			H3:          ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "### "}},
-			H4:          ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "#### "}},
-			H5:          ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "##### "}},
-			H6:          ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "###### "}},
-			Strikethrough: ansi.StylePrimitive{CrossedOut: boolPtr(true)},
-			Emph:        ansi.StylePrimitive{Color: strPtr("#e36209"), Italic: boolPtr(true)},
-			Strong:      ansi.StylePrimitive{Color: strPtr("#005cc5"), Bold: boolPtr(true)},
+			Document:       ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Color: strPtr("#24292e")}, Margin: uintPtr(0)},
+			Paragraph:      ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Color: strPtr("#24292e")}},
+			BlockQuote:     ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Color: strPtr("#6a737d"), Italic: boolPtr(true)}, Indent: uintPtr(1), IndentToken: strPtr("│ ")},
+			List:           ansi.StyleList{LevelIndent: 2},
+			Heading:        ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Color: strPtr("#005cc5"), Bold: boolPtr(true)}},
+			H1:             ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "# "}},
+			H2:             ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "## "}},
+			H3:             ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "### "}},
+			H4:             ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "#### "}},
+			H5:             ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "##### "}},
+			H6:             ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "###### "}},
+			Strikethrough:  ansi.StylePrimitive{CrossedOut: boolPtr(true)},
+			Emph:           ansi.StylePrimitive{Color: strPtr("#e36209"), Italic: boolPtr(true)},
+			Strong:         ansi.StylePrimitive{Color: strPtr("#005cc5"), Bold: boolPtr(true)},
 			HorizontalRule: ansi.StylePrimitive{Color: strPtr("#e1e4e8"), Format: "\n─────────────────────────────────────\n"},
-			Item:        ansi.StylePrimitive{BlockPrefix: "• "},
-			Enumeration: ansi.StylePrimitive{BlockPrefix: ". ", Color: strPtr("#0366d6")},
-			Task:        ansi.StyleTask{Ticked: "[✓] ", Unticked: "[ ] "},
-			Link:        ansi.StylePrimitive{Color: strPtr("#0366d6"), Underline: boolPtr(true)},
-			LinkText:    ansi.StylePrimitive{Color: strPtr("#005cc5"), Bold: boolPtr(true)},
+			Item:           ansi.StylePrimitive{BlockPrefix: "• "},
+			Enumeration:    ansi.StylePrimitive{BlockPrefix: ". ", Color: strPtr("#0366d6")},
+			Task:           ansi.StyleTask{Ticked: "[✓] ", Unticked: "[ ] "},
+			Link:           ansi.StylePrimitive{Color: strPtr("#0366d6"), Underline: boolPtr(true)},
+			LinkText:       ansi.StylePrimitive{Color: strPtr("#005cc5"), Bold: boolPtr(true)},
 			Code: ansi.StyleBlock{
 				StylePrimitive: ansi.StylePrimitive{
 					Color:           strPtr("#24292e"),
@@ -521,26 +565,26 @@ func glamourStyleConfig(themeIdx int) ansi.StyleConfig {
 
 	default: // ── Solarized Light (case 6) / fallback ──────────────────────
 		return ansi.StyleConfig{
-			Document:    ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Color: strPtr("#657b83")}, Margin: uintPtr(0)},
-			Paragraph:   ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Color: strPtr("#657b83")}},
-			BlockQuote:  ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Color: strPtr("#93a1a1"), Italic: boolPtr(true)}, Indent: uintPtr(1), IndentToken: strPtr("│ ")},
-			List:        ansi.StyleList{LevelIndent: 2},
-			Heading:     ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Color: strPtr("#268bd2"), Bold: boolPtr(true)}},
-			H1:          ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "# "}},
-			H2:          ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "## "}},
-			H3:          ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "### "}},
-			H4:          ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "#### "}},
-			H5:          ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "##### "}},
-			H6:          ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "###### "}},
-			Strikethrough: ansi.StylePrimitive{CrossedOut: boolPtr(true)},
-			Emph:        ansi.StylePrimitive{Color: strPtr("#cb4b16"), Italic: boolPtr(true)},
-			Strong:      ansi.StylePrimitive{Color: strPtr("#268bd2"), Bold: boolPtr(true)},
+			Document:       ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Color: strPtr("#657b83")}, Margin: uintPtr(0)},
+			Paragraph:      ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Color: strPtr("#657b83")}},
+			BlockQuote:     ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Color: strPtr("#93a1a1"), Italic: boolPtr(true)}, Indent: uintPtr(1), IndentToken: strPtr("│ ")},
+			List:           ansi.StyleList{LevelIndent: 2},
+			Heading:        ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Color: strPtr("#268bd2"), Bold: boolPtr(true)}},
+			H1:             ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "# "}},
+			H2:             ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "## "}},
+			H3:             ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "### "}},
+			H4:             ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "#### "}},
+			H5:             ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "##### "}},
+			H6:             ansi.StyleBlock{StylePrimitive: ansi.StylePrimitive{Prefix: "###### "}},
+			Strikethrough:  ansi.StylePrimitive{CrossedOut: boolPtr(true)},
+			Emph:           ansi.StylePrimitive{Color: strPtr("#cb4b16"), Italic: boolPtr(true)},
+			Strong:         ansi.StylePrimitive{Color: strPtr("#268bd2"), Bold: boolPtr(true)},
 			HorizontalRule: ansi.StylePrimitive{Color: strPtr("#eee8d5"), Format: "\n─────────────────────────────────────\n"},
-			Item:        ansi.StylePrimitive{BlockPrefix: "• "},
-			Enumeration: ansi.StylePrimitive{BlockPrefix: ". ", Color: strPtr("#2aa198")},
-			Task:        ansi.StyleTask{Ticked: "[✓] ", Unticked: "[ ] "},
-			Link:        ansi.StylePrimitive{Color: strPtr("#268bd2"), Underline: boolPtr(true)},
-			LinkText:    ansi.StylePrimitive{Color: strPtr("#6c71c4"), Bold: boolPtr(true)},
+			Item:           ansi.StylePrimitive{BlockPrefix: "• "},
+			Enumeration:    ansi.StylePrimitive{BlockPrefix: ". ", Color: strPtr("#2aa198")},
+			Task:           ansi.StyleTask{Ticked: "[✓] ", Unticked: "[ ] "},
+			Link:           ansi.StylePrimitive{Color: strPtr("#268bd2"), Underline: boolPtr(true)},
+			LinkText:       ansi.StylePrimitive{Color: strPtr("#6c71c4"), Bold: boolPtr(true)},
 			Code: ansi.StyleBlock{
 				StylePrimitive: ansi.StylePrimitive{
 					Color:           strPtr("#2e3436"),
